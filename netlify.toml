@@ -1,0 +1,22 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[functions]
+  included_files = ["backend/__init__.py", "backend/scoring/**", "backend/filings/**"]
+
+[dev]
+  command = "npm run dev:frontend"
+  port = 3000
+  targetPort = 3000
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

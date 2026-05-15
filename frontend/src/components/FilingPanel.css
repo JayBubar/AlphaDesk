@@ -1,0 +1,121 @@
+.filing-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.filing-load-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-body);
+}
+.filing-load-btn:hover {
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
+
+.filing-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 10px;
+}
+
+.filing-loading,
+.filing-error,
+.filing-warn {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.filing-error { color: var(--red); }
+.filing-warn { color: var(--amber); margin-bottom: 8px; }
+
+.filing-loaded {}
+
+.filing-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.filing-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+}
+.filing-score {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+.filing-score[data-tier="good"] { background: var(--green-dim); color: var(--green); }
+.filing-score[data-tier="warn"] { background: var(--amber-dim); color: var(--amber); }
+.filing-score[data-tier="bad"]  { background: var(--red-dim);   color: var(--red); }
+
+.filing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+.filing-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fc-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+}
+.fc-val {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.fc-sub {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.filing-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.filing-meta a {
+  color: var(--gold);
+  text-decoration: none;
+}
+.filing-meta a:hover { text-decoration: underline; }
+.filing-meta-sep { color: var(--text-muted); }
+
+.filing-refresh {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border-accent);
+  color: var(--text-muted);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.filing-refresh:hover {
+  border-color: var(--gold-border);
+  color: var(--gold);
+}

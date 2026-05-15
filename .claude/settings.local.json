@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp *)",
+      "Bash(curl -s -o - -w \"\\\\nHTTP Status: %{http_code}\\\\n\" https://mcp.financialdatasets.ai -H \"Authorization: c7b8ab6a-21eb-447e-8f96-1972d416ca44\" -H \"Content-Type: application/json\")",
+      "WebSearch",
+      "Bash(python -m pytest backend/tests/test_engine.py -v)",
+      "Bash(python -m pip install pytest)",
+      "Bash(python -c ' *)",
+      "Bash(npm run *)",
+      "Bash(python -m pytest backend/tests/ -v)",
+      "Bash(python -m pytest backend/tests/)",
+      "Bash(python -c \"from backend.main import app; from backend.filings import score_filing_tone; from backend.scoring import score_universe, fmp_to_metrics, yfinance_to_metrics; routes = [r.path for r in app.routes]; print\\('routes:', routes\\)\")",
+      "Bash(npm --version)"
+    ]
+  }
+}

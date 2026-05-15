@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.netlify/
+__pycache__/
+*.pyc
+.env
+.env.local
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+.pytest_cache/
+
+# Runtime data — audit-log score snapshots and filings cache
+backend/data/scores/
+backend/data/filings/

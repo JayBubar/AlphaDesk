@@ -1,0 +1,31 @@
+.score-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.sb-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  width: 26px;
+  flex-shrink: 0;
+}
+.sb-track {
+  flex: 1;
+  height: 3px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sb-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.sb-val {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  width: 20px;
+  text-align: right;
+  flex-shrink: 0;
+}
