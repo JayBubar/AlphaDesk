@@ -16,8 +16,9 @@ export default async (req) => {
   const code         = url.searchParams.get('code');
   const clientId     = process.env.SCHWAB_CLIENT_ID;
   const clientSecret = process.env.SCHWAB_CLIENT_SECRET;
+  // Must match the Callback URL registered in the Schwab developer portal exactly
   const redirectUri  = process.env.SCHWAB_REDIRECT_URI
-    || 'https://alphadesk-app.netlify.app/api/schwab-auth';
+    || 'https://alphadesk-app.netlify.app/callback';
 
   if (!clientId || !clientSecret) {
     return new Response(
