@@ -11,7 +11,16 @@
       "Bash(python -m pytest backend/tests/ -v)",
       "Bash(python -m pytest backend/tests/)",
       "Bash(python -c \"from backend.main import app; from backend.filings import score_filing_tone; from backend.scoring import score_universe, fmp_to_metrics, yfinance_to_metrics; routes = [r.path for r in app.routes]; print\\('routes:', routes\\)\")",
-      "Bash(npm --version)"
+      "Bash(npm --version)",
+      "mcp__b8ee992b-e653-4d32-b034-35ccd8dfa6cf__netlify-project-services-reader",
+      "mcp__b8ee992b-e653-4d32-b034-35ccd8dfa6cf__netlify-deploy-services-reader",
+      "Bash(git init *)",
+      "Bash(git remote *)",
+      "mcp__b8ee992b-e653-4d32-b034-35ccd8dfa6cf__get-netlify-coding-context",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\jaybu\\\\Desktop\\\\investment-tool\\\\netlify\\\\functions\\\\shared\")"
     ]
   }
 }
