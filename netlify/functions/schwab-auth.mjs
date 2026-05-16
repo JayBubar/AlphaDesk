@@ -68,7 +68,9 @@ export default async (req) => {
     const store = getStore('schwab-auth');
     await store.set(BLOB_KEY, JSON.stringify(tokens));
 
-    return Response.redirect('/?schwab=connected', 302);
+    // Response.redirect requires an absolute URL in server-side context
+    const origin = url.origin;
+    return Response.redirect(`${origin}/?schwab=connected`, 302);
 
   } catch (err) {
     return new Response(`Internal error: ${err.message}`, { status: 500 });
