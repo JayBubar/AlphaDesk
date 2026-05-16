@@ -1,4 +1,6 @@
-const BASE = import.meta.env.DEV ? '/api' : '/.netlify/functions'
+// In dev: Vite proxies /api → FastAPI on :8000 (see vite.config.js).
+// In production: Netlify routes /api/* → /.netlify/functions/:splat.
+const BASE = import.meta.env.DEV ? '/api' : '/api'
 
 export async function screenStocks(filters) {
   const params = new URLSearchParams()
@@ -37,4 +39,18 @@ export async function refreshPrices(tickers) {
   })
   if (!res.ok) throw new Error(`Prices failed: ${res.status}`)
   return res.json()
+}
+
+export async function getSchwabStatus() {
+  try {
+    const res = await fetch(`${BASE}/schwab-status`)
+    if (!res.ok) return { connected: false }
+    return res.json()
+  } catch {
+    return { connected: false }
+  }
+}
+
+export async function connectSchwab() {
+  window.location.href = `${BASE}/schwab-auth`
 }

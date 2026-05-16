@@ -12,6 +12,21 @@
   targetPort = 3000
 
 [[redirects]]
+  from = "/api/schwab-auth"
+  to = "/.netlify/functions/schwab-auth"
+  status = 200
+
+[[redirects]]
+  from = "/api/schwab-status"
+  to = "/.netlify/functions/schwab-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/prices"
+  to = "/.netlify/functions/prices"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200

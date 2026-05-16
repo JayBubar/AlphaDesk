@@ -1,14 +1,19 @@
 /**
  * Netlify serverless function — stock screening + peer-normalized scoring.
  *
- * Replaces screen.py (Python functions are not supported in Netlify's
- * current runtime). Uses yahoo-finance2 for market data — all 25 tickers
- * fetched in parallel via Promise.allSettled (~200 ms wall time vs the
- * Python serial approach that exceeded the 10-second timeout).
+ * Data pipeline (in priority order):
+ *   1. Schwab MarketData v1  → bulk quote for all 25 tickers (1 API call)
+ *        Provides: price, volume, beta, PE, gross margin, D/E, ROE, short %
+ *   2. FMP /stable/ API      → profile + quote for survivors only (2 calls)
+ *        Adds: sector, industry, company name, DCF, analyst target, MA50/MA200
+ *   3. yahoo-finance2        → fallback when Schwab token unavailable
+ *
+ * The scoring engine (peer-percentile, 4 profiles) runs identically regardless
+ * of which data source is used.
  */
+import { getSchwabToken } from './shared/schwab-token.mjs';
 import yahooFinance from 'yahoo-finance2';
 
-// Suppress schema-validation noise (some fields vary by ticker type / region)
 yahooFinance.setGlobalConfig({ validation: { logErrors: false } });
 
 // ── Universe ──────────────────────────────────────────────────────────────────
@@ -172,7 +177,7 @@ function scoreUniverse(survivors, profileName) {
       breakdown.reduce((s, bd) => s + bd.score * bd.weight, 0) / totalW,
     )));
 
-    // Keep legacy flat key shape the frontend's Portfolio / Signals tabs expect
+    // Legacy flat key shape the frontend's Portfolio / Signals tabs expect
     const pillars = Object.fromEntries(
       PILLARS.map(p => [p === 'filings' ? 'filingTone' : p,
         breakdown.find(b => b.pillar === p)?.score ?? 50]),
@@ -182,8 +187,73 @@ function scoreUniverse(survivors, profileName) {
   });
 }
 
-// ── Data adapter ──────────────────────────────────────────────────────────────
-function toMetrics(priceData, finData, statsData, detailData) {
+// ── Filter constants ──────────────────────────────────────────────────────────
+const CAP_RANGES = {
+  sm: [3e8, 2e9], md: [2e9, 1e10], lg: [1e10, 2e11], mg: [2e11, Infinity],
+};
+
+// ── Schwab data adapter ───────────────────────────────────────────────────────
+/**
+ * Map combined Schwab (quote + fundamental) and FMP (profile + quote) data
+ * into the canonical metrics dict consumed by the scoring engine.
+ *
+ * Schwab fundamental provides: peRatio, grossMarginTTM, returnOnEquity,
+ *   debtToEquity, shortIntToFloat, beta, marketCap
+ * FMP adds: priceAvg50, priceAvg200, targetMeanPrice, dcf
+ */
+function schwabFmpToMetrics(schwabEntry, fmpProfile, fmpQuote) {
+  const q  = schwabEntry?.quote       || {};
+  const f  = schwabEntry?.fundamental || {};
+  const p  = fmpProfile               || {};
+  const fq = fmpQuote                 || {};
+
+  const cp  = safe(q.lastPrice);
+  const h52 = safe(q['52WkHigh'] ?? f.highPrice52);
+  const l52 = safe(q['52WkLow']  ?? f.lowPrice52);
+
+  const pos52 = (h52 != null && l52 != null && cp != null && (h52 - l52) > 0)
+    ? (cp - l52) / (h52 - l52) : null;
+
+  // FMP gives more reliable MA data; Schwab has the live price
+  const refPrice = safe(fq.price) ?? cp;
+  const ma50     = safe(fq.priceAvg50);
+  const ma200    = safe(fq.priceAvg200);
+  const maTrend  = (refPrice && ma50 && ma200)
+    ? (refPrice > ma50 && ma50 > ma200 ? 1
+     : refPrice < ma50 && ma50 < ma200 ? -1 : 0)
+    : null;
+
+  // Analyst upside — FMP profile's targetMeanPrice vs live Schwab price
+  const tgt         = safe(p.targetMeanPrice ?? p.priceTarget);
+  const analystUp   = (tgt != null && cp) ? ((tgt - cp) / cp) * 100 : null;
+
+  // Gross margin: Schwab provides ratio directly (grossMarginTTM)
+  // FMP profile carries revenueTTM + grossProfitTTM as fallback
+  const gmSchwab = safe(f.grossMarginTTM);
+  const gmFmp    = (p.revenueTTM && p.grossProfitTTM)
+    ? p.grossProfitTTM / p.revenueTTM : null;
+
+  return {
+    pe:                safe(f.peRatio ?? p.pe ?? fq.pe),
+    fcf_yield:         null,   // needs separate FCF endpoint; deferred
+    roic:              safe(f.returnOnEquity ?? p.returnOnEquity),
+    gross_margin:      gmSchwab ?? gmFmp,
+    debt_equity:       safe(f.debtToEquity ?? p.debtToEquity),
+    price_position_52w: pos52,
+    ma_trend:          maTrend,
+    price_change:      safe(q.netPercentChange),
+    analyst_upside:    analystUp,
+    short_interest:    safe(f.shortIntToFloat),
+    recommendation:    null,   // not available from Schwab/FMP profile
+    filing_drift:      null,
+    hedging_delta:     null,
+    insider_pct:       null,   // SEC EDGAR / premium tier required
+    inst_pct:          null,
+  };
+}
+
+// ── Yahoo-finance2 data adapter (fallback) ────────────────────────────────────
+function yahooToMetrics(priceData, finData, statsData, detailData) {
   const cp   = safe(priceData?.regularMarketPrice);
   const h52  = safe(priceData?.fiftyTwoWeekHigh);
   const l52  = safe(priceData?.fiftyTwoWeekLow);
@@ -219,10 +289,24 @@ function toMetrics(priceData, finData, statsData, detailData) {
   };
 }
 
-// ── Filter constants ──────────────────────────────────────────────────────────
-const CAP_RANGES = {
-  sm: [3e8, 2e9], md: [2e9, 1e10], lg: [1e10, 2e11], mg: [2e11, Infinity],
-};
+// ── FMP fetch helpers ─────────────────────────────────────────────────────────
+const FMP_BASE = 'https://financialmodelingprep.com/stable';
+
+async function fmpBatch(path, symbols, apiKey) {
+  if (!apiKey || !symbols.length) return {};
+  try {
+    const url = `${FMP_BASE}/${path}?symbol=${encodeURIComponent(symbols.join(','))}&apikey=${apiKey}`;
+    const res = await fetch(url);
+    if (!res.ok) return {};
+    const data = await res.json();
+    // Index by symbol for O(1) lookup
+    const map = {};
+    if (Array.isArray(data)) data.forEach(item => { if (item.symbol) map[item.symbol] = item; });
+    return map;
+  } catch {
+    return {};
+  }
+}
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 export default async (req) => {
@@ -238,7 +322,128 @@ export default async (req) => {
     const betaMax      = parseFloat(sp.get('betaMax')  || '5');
     const profileName  = sp.get('profile') || 'growth_mid';
 
-    // Fetch all tickers in parallel — wall time ≈ slowest single request (~300 ms)
+    const fmpKey = process.env.FMP_API_KEY || '';
+
+    // ── Path A: Schwab + FMP ────────────────────────────────────────────────
+    const token = await getSchwabToken();
+
+    if (token) {
+      // Phase 1 — Schwab bulk quotes (1 API call for all 25 tickers)
+      const params = new URLSearchParams({
+        symbols: UNIVERSE.join(','),
+        fields:  'quote,fundamental,reference',
+      });
+      const schwabRes = await fetch(
+        `https://api.schwabapi.com/marketdata/v1/quotes?${params}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      if (!schwabRes.ok) {
+        // Token may have been revoked — fall through to yahoo fallback
+        throw new Error(`Schwab API error ${schwabRes.status}: falling back`);
+      }
+
+      const schwabData = await schwabRes.json();
+
+      // Pass-1 filter using Schwab data
+      const presurvivors = [];
+      for (const symbol of UNIVERSE) {
+        const entry = schwabData[symbol];
+        if (!entry) continue;
+
+        const q = entry.quote       || {};
+        const f = entry.fundamental || {};
+
+        const cp   = safe(q.lastPrice,  0);
+        if (!cp) continue;
+
+        const vol  = safe(q.totalVolume, 0);
+        const beta = safe(f.beta,        0);
+        const mcap = safe(f.marketCap,   0);
+
+        if (cp   < priceMin || cp > priceMax) continue;
+        if (vol  < volMin)                    continue;
+        if (beta && beta > betaMax)           continue;
+        if (filterCap && CAP_RANGES[filterCap]) {
+          const [lo, hi] = CAP_RANGES[filterCap];
+          if (mcap < lo || mcap > hi) continue;
+        }
+
+        presurvivors.push(symbol);
+      }
+
+      if (!presurvivors.length) return Response.json([]);
+
+      // Phase 2 — FMP fundamentals for survivors (2 API calls)
+      const [profileMap, fmpQuoteMap] = await Promise.all([
+        fmpBatch('profile', presurvivors, fmpKey),
+        fmpBatch('quote',   presurvivors, fmpKey),
+      ]);
+
+      // Apply sector filter (sector only known after FMP profile)
+      const survivors = presurvivors.filter(sym => {
+        if (!filterSector) return true;
+        return (profileMap[sym]?.sector || '') === filterSector;
+      });
+
+      if (!survivors.length) return Response.json([]);
+
+      // Build canonical shape
+      const scoringInput = survivors.map(sym => {
+        const entry = schwabData[sym];
+        const q = entry?.quote       || {};
+        const f = entry?.fundamental || {};
+        const r = entry?.reference   || {};
+        const p = profileMap[sym]   || {};
+        const fq = fmpQuoteMap[sym] || {};
+
+        const cp   = safe(q.lastPrice, 0);
+        const mcap = safe(f.marketCap, 0);
+        const pe   = safe(f.peRatio ?? p.pe ?? fq.pe);
+        const beta = safe(f.beta);
+        const h52  = safe(q['52WkHigh']);
+        const l52  = safe(q['52WkLow']);
+
+        return {
+          ticker:  sym,
+          metrics: schwabFmpToMetrics(entry, p, fq),
+          surface: {
+            name:      safe(p.companyName ?? r.description, sym),
+            sector:    safe(p.sector,   ''),
+            industry:  safe(p.industry, ''),
+            price:     Math.round(cp * 100) / 100,
+            change:    safe(q.netPercentChange),
+            pe:        pe   != null ? Math.round(pe   * 10) / 10 : null,
+            marketCap: mcap,
+            beta:      beta != null ? Math.round(beta * 100) / 100 : null,
+            volume:    Math.round(safe(q.totalVolume, 0)),
+            high52w:   h52,
+            low52w:    l52,
+            divYield:  safe(f.divYield),
+            dcf:       safe(p.dcf),
+          },
+        };
+      });
+
+      // Pass-2 peer-percentile scoring
+      const scores  = scoreUniverse(scoringInput, profileName);
+      const results = scoringInput.map((s, i) => ({
+        ticker:             s.ticker,
+        ...s.surface,
+        scores:             scores[i].pillars,
+        composite:          scores[i].composite,
+        breakdown:          scores[i].breakdown,
+        profile:            scores[i].profile,
+        methodologyVersion: METHODOLOGY_VERSION,
+        dataSource:         'schwab+fmp',
+        flags:              [],
+        why:                `${s.surface.name} (${s.surface.sector}).`,
+      }));
+
+      return Response.json(results);
+    }
+
+    // ── Path B: yahoo-finance2 fallback (no Schwab token) ──────────────────
     const fetched = await Promise.allSettled(
       UNIVERSE.map(symbol =>
         yahooFinance.quoteSummary(symbol, {
@@ -248,7 +453,6 @@ export default async (req) => {
       ),
     );
 
-    // Pass-1 filter
     const survivors = [];
     for (const result of fetched) {
       if (result.status !== 'fulfilled') continue;
@@ -280,7 +484,7 @@ export default async (req) => {
 
       survivors.push({
         ticker:  symbol,
-        metrics: toMetrics(priceData, finData, statsData, detailData),
+        metrics: yahooToMetrics(priceData, finData, statsData, detailData),
         surface: {
           name:      safe(priceData.longName || priceData.shortName, symbol),
           sector:    sec,
@@ -301,7 +505,6 @@ export default async (req) => {
 
     if (!survivors.length) return Response.json([]);
 
-    // Pass-2 peer-percentile scoring
     const scores  = scoreUniverse(survivors, profileName);
     const results = survivors.map((s, i) => ({
       ticker:             s.ticker,
@@ -311,6 +514,7 @@ export default async (req) => {
       breakdown:          scores[i].breakdown,
       profile:            scores[i].profile,
       methodologyVersion: METHODOLOGY_VERSION,
+      dataSource:         'yahoo',
       flags:              [],
       why:                `${s.surface.name} (${s.surface.sector}).`,
     }));
@@ -318,6 +522,103 @@ export default async (req) => {
     return Response.json(results);
 
   } catch (err) {
+    // If Schwab path threw (revoked token, API error), retry with yahoo fallback
+    if (err.message?.includes('falling back')) {
+      // Re-enter with a stripped token env to force yahoo path
+      // Simpler: just recurse once without Schwab
+      try {
+        return await yahooFallbackHandler(req);
+      } catch (fallbackErr) {
+        return Response.json({ error: fallbackErr.message }, { status: 500 });
+      }
+    }
     return Response.json({ error: err.message, stack: err.stack }, { status: 500 });
   }
 };
+
+// ── Standalone yahoo fallback (called when Schwab errors mid-flight) ──────────
+async function yahooFallbackHandler(req) {
+  const sp = new URL(req.url).searchParams;
+  const filterSector = sp.get('sector')  || '';
+  const filterCap    = sp.get('cap')     || '';
+  const priceMin     = parseFloat(sp.get('priceMin') || '0');
+  const priceMax     = parseFloat(sp.get('priceMax') || '99999');
+  const volMin       = parseFloat(sp.get('volMin')   || '0') * 1000;
+  const betaMax      = parseFloat(sp.get('betaMax')  || '5');
+  const profileName  = sp.get('profile') || 'growth_mid';
+
+  const fetched = await Promise.allSettled(
+    UNIVERSE.map(symbol =>
+      yahooFinance.quoteSummary(symbol, {
+        modules: ['price','financialData','defaultKeyStatistics',
+                  'summaryProfile','summaryDetail'],
+      }).then(data => ({ symbol, data })),
+    ),
+  );
+
+  const survivors = [];
+  for (const result of fetched) {
+    if (result.status !== 'fulfilled') continue;
+    const { symbol, data } = result.value;
+
+    const priceData  = data.price                || {};
+    const finData    = data.financialData        || {};
+    const statsData  = data.defaultKeyStatistics || {};
+    const profData   = data.summaryProfile       || {};
+    const detailData = data.summaryDetail        || {};
+
+    const cp   = safe(priceData.regularMarketPrice, 0);
+    if (!cp) continue;
+
+    const vol  = safe(priceData.regularMarketVolume, 0);
+    const beta = safe(priceData.beta ?? detailData.beta, 0);
+    const mcap = safe(priceData.marketCap, 0);
+    const sec  = safe(profData.sector || priceData.sector, '');
+    const pe   = safe(priceData.trailingPE ?? detailData.trailingPE);
+
+    if (filterSector && sec !== filterSector) continue;
+    if (cp < priceMin || cp > priceMax)        continue;
+    if (vol < volMin)                           continue;
+    if (beta && beta > betaMax)                 continue;
+    if (filterCap && CAP_RANGES[filterCap]) {
+      const [lo, hi] = CAP_RANGES[filterCap];
+      if (mcap < lo || mcap > hi) continue;
+    }
+
+    survivors.push({
+      ticker:  symbol,
+      metrics: yahooToMetrics(priceData, finData, statsData, detailData),
+      surface: {
+        name:      safe(priceData.longName || priceData.shortName, symbol),
+        sector:    sec,
+        industry:  safe(profData.industry, ''),
+        price:     Math.round(cp * 100) / 100,
+        change:    safe(priceData.regularMarketChangePercent),
+        pe:        pe != null ? Math.round(pe * 10) / 10 : null,
+        marketCap: mcap,
+        beta:      beta ? Math.round(beta * 100) / 100 : null,
+        volume:    Math.round(vol),
+        high52w:   safe(priceData.fiftyTwoWeekHigh),
+        low52w:    safe(priceData.fiftyTwoWeekLow),
+        divYield:  safe(detailData.dividendYield ?? priceData.dividendYield),
+        dcf:       null,
+      },
+    });
+  }
+
+  if (!survivors.length) return Response.json([]);
+
+  const scores  = scoreUniverse(survivors, profileName);
+  return Response.json(survivors.map((s, i) => ({
+    ticker:             s.ticker,
+    ...s.surface,
+    scores:             scores[i].pillars,
+    composite:          scores[i].composite,
+    breakdown:          scores[i].breakdown,
+    profile:            scores[i].profile,
+    methodologyVersion: METHODOLOGY_VERSION,
+    dataSource:         'yahoo-fallback',
+    flags:              [],
+    why:                `${s.surface.name} (${s.surface.sector}).`,
+  })));
+}

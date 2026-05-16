@@ -101,3 +101,52 @@
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
+
+/* Schwab-connected dot — gold instead of green */
+.status-dot--schwab {
+  background: var(--gold);
+}
+
+/* "Connect Schwab" CTA button */
+.nav-connect-btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-md);
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-right: 8px;
+}
+
+.nav-connect-btn:hover {
+  background: var(--gold-dim);
+}
+
+/* Success toast (appears top-center when ?schwab=connected) */
+.nav-toast {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  border: 1px solid var(--gold-border);
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 18px;
+  border-radius: var(--radius-md);
+  z-index: 1000;
+  pointer-events: none;
+  animation: fadeInOut 4s ease forwards;
+}
+
+@keyframes fadeInOut {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+  10%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
