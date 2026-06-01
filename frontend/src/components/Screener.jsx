@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, Fragment } from 'react'
-import { screenStocks } from '../lib/api.js'
+import { screenStocks, getUniverse } from '../lib/api.js'
 import {
   scoreColor, scoreBg,
   fmtNum, fmtPct, fmtMarketCap, fmtVolume,
@@ -50,8 +50,26 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
   const [sortDir, setSortDir] = useState(-1)
   const [expandedRow, setExpandedRow] = useState(null)
   const [methodologyVersion, setMethodologyVersion] = useState(null)
+  const [universeInfo, setUniverseInfo] = useState(null)
+  const [universeRefreshing, setUniverseRefreshing] = useState(false)
 
   useEffect(() => { storage.saveProfile(profile) }, [profile])
+
+  useEffect(() => {
+    getUniverse().then(setUniverseInfo).catch(() => {})
+  }, [])
+
+  async function refreshUniverse() {
+    setUniverseRefreshing(true)
+    try {
+      const info = await getUniverse({ refresh: true })
+      setUniverseInfo(info)
+    } catch (e) {
+      console.error('Universe refresh failed:', e)
+    } finally {
+      setUniverseRefreshing(false)
+    }
+  }
 
   const watchSet = new Set(watchlist.map(s => s.ticker))
   const profileMeta = getProfile(profile)
@@ -105,6 +123,26 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
         <p className="page-subtitle">
           Profile-aware peer-percentile scoring · methodology {methodologyVersion || '—'}
         </p>
+        {universeInfo && (
+          <div className="universe-indicator">
+            <span className="ui-label">Universe:</span>
+            <strong>{universeInfo.count} stocks</strong>
+            {universeInfo.refreshed_at && (
+              <span className="ui-stale">
+                · refreshed {new Date(universeInfo.refreshed_at).toLocaleDateString()}
+              </span>
+            )}
+            {universeInfo.source === 'fallback' && (
+              <span className="ui-fallback" title="Wikipedia parse failed; using fallback list">
+                · fallback
+              </span>
+            )}
+            <button className="ui-refresh-btn" onClick={refreshUniverse}
+              disabled={universeRefreshing} title="Re-fetch S&P 500 / 400 from Wikipedia">
+              {universeRefreshing ? '…' : '↻'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="screener-panels">

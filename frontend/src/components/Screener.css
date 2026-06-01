@@ -467,3 +467,40 @@ input[type=range] {
   margin-top: -2px;
   padding-left: 2px;
 }
+
+.universe-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.universe-indicator strong {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+.ui-label {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+.ui-stale, .ui-fallback {
+  color: var(--text-muted);
+}
+.ui-fallback { color: var(--amber); }
+.ui-refresh-btn {
+  margin-left: 4px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.ui-refresh-btn:hover:not(:disabled) {
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
+.ui-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }

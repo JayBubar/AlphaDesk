@@ -9,7 +9,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
-import math, time, os, httpx
+import math, time, os, httpx, json, re, urllib.request, urllib.error
+from datetime import datetime, timezone
+from pathlib import Path
 
 from backend.scoring import (
     score_universe, fmp_to_metrics, result_to_dict,
@@ -31,12 +33,124 @@ app.add_middleware(
 FMP_KEY  = os.environ.get("FMP_API_KEY", "PASTE_YOUR_KEY_HERE")
 FMP_BASE = "https://financialmodelingprep.com/stable"
 
-UNIVERSE = [
-    "MSFT", "AAPL", "GOOGL", "NVDA", "META",
-    "UNH",  "JPM",  "LLY",   "V",    "PG",
-    "KO",   "COST", "WMT",   "MCD",  "AMD",
-    "AMAT", "AXON", "CRWD",  "WM",   "BAC",
+# ── Dynamic universe: S&P 500 + S&P 400 from Wikipedia ───────────────────────
+# 7-day file cache mirrors the Netlify Blobs cache used in production. Falls
+# back to a small hardcoded list if Wikipedia is unreachable, so dev still works.
+_UNIVERSE_CACHE_PATH = Path(__file__).resolve().parent / "data" / "universe_cache.json"
+_UNIVERSE_TTL_SEC = 7 * 24 * 60 * 60
+_WIKI_UA = "AlphaDeskBot/1.0 (https://alphadesk-app.netlify.app; research only)"
+_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+_SP400_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_400_companies"
+
+_FALLBACK_UNIVERSE = [
+    {"symbol": "MSFT", "sector": "Information Technology"},
+    {"symbol": "AAPL", "sector": "Information Technology"},
+    {"symbol": "GOOGL","sector": "Communication Services"},
+    {"symbol": "NVDA", "sector": "Information Technology"},
+    {"symbol": "META", "sector": "Communication Services"},
+    {"symbol": "UNH",  "sector": "Health Care"},
+    {"symbol": "JPM",  "sector": "Financials"},
+    {"symbol": "LLY",  "sector": "Health Care"},
+    {"symbol": "V",    "sector": "Financials"},
+    {"symbol": "PG",   "sector": "Consumer Staples"},
+    {"symbol": "KO",   "sector": "Consumer Staples"},
+    {"symbol": "COST", "sector": "Consumer Staples"},
+    {"symbol": "WMT",  "sector": "Consumer Staples"},
+    {"symbol": "MCD",  "sector": "Consumer Discretionary"},
+    {"symbol": "AMD",  "sector": "Information Technology"},
+    {"symbol": "AMAT", "sector": "Information Technology"},
+    {"symbol": "AXON", "sector": "Industrials"},
+    {"symbol": "CRWD", "sector": "Information Technology"},
+    {"symbol": "WM",   "sector": "Industrials"},
+    {"symbol": "BAC",  "sector": "Financials"},
 ]
+
+
+def _strip_html(s: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", s)
+                  .replace("&nbsp;", " ").replace("&amp;", "&")
+                  .replace("&#39;", "'").replace("&quot;", '"')).strip()
+
+
+def _parse_wiki_constituents(html: str) -> list[dict]:
+    """Pull {symbol, name, sector} rows from the first .wikitable on the page."""
+    table_match = re.search(
+        r'<table[^>]*class="[^"]*wikitable[^"]*"[^>]*>([\s\S]*?)</table>', html)
+    if not table_match:
+        return []
+    rows = re.findall(r"<tr[\s\S]*?</tr>", table_match.group(1))
+    out: list[dict] = []
+    for row in rows:
+        cells = re.findall(r"<t[hd][\s\S]*?</t[hd]>", row)
+        if len(cells) < 3:
+            continue
+        sym, name, sector = (_strip_html(c) for c in cells[:3])
+        if not sym or not name or not sector:
+            continue
+        if sym.lower() in ("symbol", "ticker"):
+            continue
+        if not re.match(r"^[A-Z][A-Z0-9.\-]{0,7}$", sym):
+            continue
+        out.append({
+            "symbol": sym.replace(".", "-"),  # BRK.B → BRK-B
+            "name": name,
+            "sector": sector,
+        })
+    return out
+
+
+def _fetch_wiki(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": _WIKI_UA})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def _build_universe() -> dict:
+    errors = []
+    try:
+        sp500 = _parse_wiki_constituents(_fetch_wiki(_SP500_URL))
+    except Exception as e:
+        sp500 = []
+        errors.append(f"sp500: {e}")
+    try:
+        sp400 = _parse_wiki_constituents(_fetch_wiki(_SP400_URL))
+    except Exception as e:
+        sp400 = []
+        errors.append(f"sp400: {e}")
+
+    merged: dict[str, dict] = {e["symbol"]: e for e in sp400}
+    for e in sp500:
+        merged[e["symbol"]] = e  # S&P 500 wins on collision
+
+    tickers = sorted(merged.values(), key=lambda e: e["symbol"])
+    if len(tickers) < 100:
+        return {"tickers": _FALLBACK_UNIVERSE, "source": "fallback", "errors": errors or ["parsed too few rows"]}
+    return {"tickers": tickers, "source": "wikipedia", "errors": errors}
+
+
+def load_universe(force_refresh: bool = False) -> list[dict]:
+    """Return the cached universe; refresh from Wikipedia if older than TTL."""
+    if not force_refresh and _UNIVERSE_CACHE_PATH.exists():
+        try:
+            cached = json.loads(_UNIVERSE_CACHE_PATH.read_text())
+            ts = datetime.fromisoformat(cached["refreshed_at"])
+            if (datetime.now(timezone.utc) - ts).total_seconds() < _UNIVERSE_TTL_SEC:
+                return cached["tickers"]
+        except Exception:
+            pass
+
+    try:
+        built = _build_universe()
+        _UNIVERSE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _UNIVERSE_CACHE_PATH.write_text(json.dumps({
+            **built,
+            "count": len(built["tickers"]),
+            "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        }, indent=2))
+        return built["tickers"]
+    except Exception as e:
+        print(f"  universe build failed: {e}")
+        return _FALLBACK_UNIVERSE
 
 CAP_RANGES = {
     "sm": (3e8,  2e9),
@@ -137,11 +251,18 @@ def screen(
         raise HTTPException(status_code=500,
             detail="FMP_API_KEY not set. Run: set FMP_API_KEY=your_key in CMD then restart server.")
 
-    print(f"\nScreen started — {len(UNIVERSE)} tickers, profile={profile}")
+    # Pre-filter universe by sector (free, from Wikipedia metadata) — saves FMP
+    # calls. The FMP loop below still re-checks sector as defence-in-depth.
+    universe = load_universe()
+    if sector:
+        universe = [u for u in universe if u["sector"] == sector]
+    tickers = [u["symbol"] for u in universe]
+
+    print(f"\nScreen started — {len(tickers)} tickers, profile={profile}")
     survivors = []  # list of (ticker, raw_payload, metrics)
 
-    for i, ticker in enumerate(UNIVERSE):
-        print(f"  [{i+1}/{len(UNIVERSE)}] Fetching {ticker}...")
+    for i, ticker in enumerate(tickers):
+        print(f"  [{i+1}/{len(tickers)}] Fetching {ticker}...")
         data = fetch_one(ticker)
         prof = data["profile"]
         quote = data["quote"]
@@ -220,7 +341,7 @@ def screen(
             "why":       build_why(prof, quote, ticker),
         })
 
-    print(f"\nScreen complete: {len(results)}/{len(UNIVERSE)} passed\n")
+    print(f"\nScreen complete: {len(results)}/{len(tickers)} passed\n")
     return results
 
 
@@ -288,6 +409,24 @@ def refresh_prices(body: PricesRequest):
             result[ticker] = {"price": None, "change": None}
         time.sleep(0.1)
     return result
+
+
+@app.get("/universe")
+def universe(refresh: bool = False):
+    """Return the dynamic S&P 500 + S&P 400 universe. 7-day file cache."""
+    tickers = load_universe(force_refresh=refresh)
+    refreshed_at = None
+    try:
+        cached = json.loads(_UNIVERSE_CACHE_PATH.read_text())
+        refreshed_at = cached.get("refreshed_at")
+    except Exception:
+        pass
+    return {
+        "tickers": tickers,
+        "count": len(tickers),
+        "refreshed_at": refreshed_at,
+        "source": "wikipedia" if len(tickers) > 100 else "fallback",
+    }
 
 
 @app.get("/health")

@@ -54,3 +54,20 @@ export async function getSchwabStatus() {
 export async function connectSchwab() {
   window.location.href = `${BASE}/schwab-auth`
 }
+
+export async function getResearch(ticker, { refresh = false } = {}) {
+  const url = `${BASE}/research/${ticker.toUpperCase()}${refresh ? '?refresh=1' : ''}`
+  const res = await fetch(url)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `Research fetch failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function getUniverse({ refresh = false } = {}) {
+  const url = `${BASE}/universe${refresh ? '?refresh=1' : ''}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Universe fetch failed: ${res.status}`)
+  return res.json()
+}

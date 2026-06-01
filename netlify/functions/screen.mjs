@@ -50,14 +50,98 @@ function injectFilingMetrics(metrics, cached) {
   };
 }
 
+// ── Research-score cache ──────────────────────────────────────────────────────
+// Written by netlify/functions/research.mjs (Perplexity-backed). 24h TTL is
+// enforced inside research.mjs at write-time; the screen path doesn't need to
+// re-check since stale entries get refreshed on next FilingPanel click.
+const RESEARCH_CACHE_STORE = 'research-cache';
+const RESEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+const SENTIMENT_SCORE_MAP = { bullish: 80, neutral: 50, bearish: 20 };
+const CONSENSUS_SCORE_MAP = { buy: 80, hold: 50, sell: 20 };
+
+async function loadResearchCache(tickers) {
+  let store;
+  try { store = getStore(RESEARCH_CACHE_STORE); } catch { return {}; }
+  const cutoff = Date.now() - RESEARCH_CACHE_TTL_MS;
+
+  const entries = await Promise.all(tickers.map(async t => {
+    try {
+      const raw = await store.get(t, { type: 'json' });
+      if (!raw || !raw.cached_at) return [t, null];
+      if (new Date(raw.cached_at).getTime() < cutoff) return [t, null];
+      return [t, raw];
+    } catch { return [t, null]; }
+  }));
+  return Object.fromEntries(entries);
+}
+
+function injectResearchMetrics(metrics, cached) {
+  if (!cached) return metrics;
+  return {
+    ...metrics,
+    sentiment_score: SENTIMENT_SCORE_MAP[cached.sentiment] ?? null,
+    // Override null recommendation with the Perplexity-derived consensus.
+    recommendation:  CONSENSUS_SCORE_MAP[cached.analystConsensus] ?? metrics.recommendation,
+  };
+}
+
 // ── Universe ──────────────────────────────────────────────────────────────────
-const UNIVERSE = [
-  'MSFT','AAPL','GOOGL','NVDA','META',
-  'UNH', 'JPM', 'LLY',  'V',   'PG',
-  'KO',  'COST','WMT',  'MCD', 'AMD',
-  'AMAT','AXON','CRWD', 'WM',  'BAC',
-  'AMZN','AVGO','NFLX', 'CRM', 'ADBE',
+// Dynamic universe is fetched from Netlify Blobs (store "universe", key
+// "sp900"), populated by universe.mjs from Wikipedia. Falls back to a small
+// hardcoded list so the screener still works if the blob is empty.
+const UNIVERSE_STORE = 'universe';
+const UNIVERSE_KEY = 'sp900';
+
+const FALLBACK_UNIVERSE = [
+  { symbol: 'MSFT',  sector: 'Information Technology' },
+  { symbol: 'AAPL',  sector: 'Information Technology' },
+  { symbol: 'GOOGL', sector: 'Communication Services' },
+  { symbol: 'NVDA',  sector: 'Information Technology' },
+  { symbol: 'META',  sector: 'Communication Services' },
+  { symbol: 'UNH',   sector: 'Health Care' },
+  { symbol: 'JPM',   sector: 'Financials' },
+  { symbol: 'LLY',   sector: 'Health Care' },
+  { symbol: 'V',     sector: 'Financials' },
+  { symbol: 'PG',    sector: 'Consumer Staples' },
+  { symbol: 'KO',    sector: 'Consumer Staples' },
+  { symbol: 'COST',  sector: 'Consumer Staples' },
+  { symbol: 'WMT',   sector: 'Consumer Staples' },
+  { symbol: 'MCD',   sector: 'Consumer Discretionary' },
+  { symbol: 'AMD',   sector: 'Information Technology' },
+  { symbol: 'AMAT',  sector: 'Information Technology' },
+  { symbol: 'AXON',  sector: 'Industrials' },
+  { symbol: 'CRWD',  sector: 'Information Technology' },
+  { symbol: 'WM',    sector: 'Industrials' },
+  { symbol: 'BAC',   sector: 'Financials' },
+  { symbol: 'AMZN',  sector: 'Consumer Discretionary' },
+  { symbol: 'AVGO',  sector: 'Information Technology' },
+  { symbol: 'NFLX',  sector: 'Communication Services' },
+  { symbol: 'CRM',   sector: 'Information Technology' },
+  { symbol: 'ADBE',  sector: 'Information Technology' },
 ];
+
+async function loadUniverse() {
+  try {
+    const store = getStore(UNIVERSE_STORE);
+    const cached = await store.get(UNIVERSE_KEY, { type: 'json' });
+    if (Array.isArray(cached?.tickers) && cached.tickers.length > 0) {
+      return cached.tickers;
+    }
+  } catch { /* fall through */ }
+  console.warn('[screen.mjs] universe blob missing — using fallback list');
+  return FALLBACK_UNIVERSE;
+}
+
+// Schwab MarketData v1 /quotes caps at ~500 symbols per call. Batch defensively.
+const SCHWAB_BATCH_SIZE = 500;
+const FMP_BATCH_SIZE = 100;
+
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 
 // ── Investment profiles ───────────────────────────────────────────────────────
 const PROFILES = {
@@ -66,7 +150,7 @@ const PROFILES = {
     sub_weights: {
       fundamentals: { pe:15, fcf_yield:30, roic:25, gross_margin:10, debt_equity:20 },
       momentum:     { price_position_52w:40, ma_trend:40, price_change:20 },
-      sentiment:    { analyst_upside:50, recommendation:30, short_interest:20 },
+      sentiment:    { analyst_upside:35, recommendation:25, short_interest:15, sentiment_score:25 },
       filings:      { filing_drift:50, hedging_delta:50 },
       insider:      { insider_pct:60, inst_pct:40 },
     },
@@ -76,7 +160,7 @@ const PROFILES = {
     sub_weights: {
       fundamentals: { pe:20, fcf_yield:20, roic:25, gross_margin:25, debt_equity:10 },
       momentum:     { price_position_52w:35, ma_trend:40, price_change:25 },
-      sentiment:    { analyst_upside:50, recommendation:30, short_interest:20 },
+      sentiment:    { analyst_upside:35, recommendation:25, short_interest:15, sentiment_score:25 },
       filings:      { filing_drift:50, hedging_delta:50 },
       insider:      { insider_pct:60, inst_pct:40 },
     },
@@ -86,7 +170,7 @@ const PROFILES = {
     sub_weights: {
       fundamentals: { pe:30, fcf_yield:20, roic:20, gross_margin:15, debt_equity:15 },
       momentum:     { price_position_52w:30, ma_trend:40, price_change:30 },
-      sentiment:    { analyst_upside:40, recommendation:30, short_interest:30 },
+      sentiment:    { analyst_upside:30, recommendation:25, short_interest:20, sentiment_score:25 },
       filings:      { filing_drift:50, hedging_delta:50 },
       insider:      { insider_pct:60, inst_pct:40 },
     },
@@ -96,7 +180,7 @@ const PROFILES = {
     sub_weights: {
       fundamentals: { pe:30, fcf_yield:20, roic:20, gross_margin:15, debt_equity:15 },
       momentum:     { price_position_52w:30, ma_trend:40, price_change:30 },
-      sentiment:    { analyst_upside:40, recommendation:30, short_interest:30 },
+      sentiment:    { analyst_upside:30, recommendation:25, short_interest:20, sentiment_score:25 },
       filings:      { filing_drift:50, hedging_delta:50 },
       insider:      { insider_pct:60, inst_pct:40 },
     },
@@ -115,14 +199,17 @@ const METRIC_DIR = {
   price_change:       1,
   analyst_upside:     1,
   short_interest:    -1,
-  recommendation:    -1,
+  // recommendation: Perplexity-derived buy/hold/sell → 80/50/20 (higher = better).
+  // Flipped from the legacy yahoo 1=strong-buy convention.
+  recommendation:     1,
+  sentiment_score:    1,  // Perplexity bullish/neutral/bearish → 80/50/20
   filing_drift:      -1,
   hedging_delta:     -1,
   insider_pct:        1,
   inst_pct:           1,
 };
 
-const METHODOLOGY_VERSION = '2026.05.1';
+const METHODOLOGY_VERSION = '2026.06.1';
 const PILLARS = ['fundamentals','momentum','sentiment','filings','insider'];
 
 // ── Scoring engine ────────────────────────────────────────────────────────────
@@ -350,22 +437,43 @@ export default async (req) => {
     const fmpKey = process.env.FMP_API_KEY || '';
     const token  = await getSchwabToken();
 
+    // Load dynamic universe ({symbol, sector, name}). Sector lives in the
+    // universe metadata so we can apply the sector filter BEFORE any API
+    // calls — huge win at 900-ticker scale.
+    let universeEntries = await loadUniverse();
+    if (filterSector) {
+      universeEntries = universeEntries.filter(u => u.sector === filterSector);
+    }
+    if (!universeEntries.length) return Response.json([]);
+
+    const universeSymbols = universeEntries.map(u => u.symbol);
+
     // ── Path A: Schwab + FMP ────────────────────────────────────────────────
     if (token) {
-      const params = new URLSearchParams({
-        symbols: UNIVERSE.join(','),
-        fields:  'quote,fundamental,reference',
-      });
-      const schwabRes = await fetch(
-        `https://api.schwabapi.com/marketdata/v1/quotes?${params}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+      // Batch Schwab into chunks of 500 (its quotes endpoint cap).
+      const schwabBatches = await Promise.all(
+        chunk(universeSymbols, SCHWAB_BATCH_SIZE).map(async batch => {
+          const params = new URLSearchParams({
+            symbols: batch.join(','),
+            fields:  'quote,fundamental,reference',
+          });
+          const res = await fetch(
+            `https://api.schwabapi.com/marketdata/v1/quotes?${params}`,
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          if (!res.ok) return null;  // null marks a failed batch
+          return res.json();
+        }),
       );
 
-      if (schwabRes.ok) {
-        const schwabData = await schwabRes.json();
+      // If every batch failed, treat as Schwab outage and drop to FMP-only.
+      if (schwabBatches.every(b => b === null)) {
+        // fall through to Path B
+      } else {
+        const schwabData = Object.assign({}, ...schwabBatches.filter(Boolean));
 
         const presurvivors = [];
-        for (const symbol of UNIVERSE) {
+        for (const symbol of universeSymbols) {
           const entry = schwabData[symbol];
           if (!entry) continue;
           const q = entry.quote       || {};
@@ -392,15 +500,17 @@ export default async (req) => {
 
         if (!presurvivors.length) return Response.json([]);
 
-        const [profileMap, fmpQuoteMap] = await Promise.all([
-          fmpBatch('profile', presurvivors, fmpKey),
-          fmpBatch('quote',   presurvivors, fmpKey),
+        // Batch FMP /profile and /quote in chunks of 100 (per-call URL limit).
+        const fmpChunks = chunk(presurvivors, FMP_BATCH_SIZE);
+        const [profileMaps, fmpQuoteMaps] = await Promise.all([
+          Promise.all(fmpChunks.map(c => fmpBatch('profile', c, fmpKey))),
+          Promise.all(fmpChunks.map(c => fmpBatch('quote',   c, fmpKey))),
         ]);
+        const profileMap  = Object.assign({}, ...profileMaps);
+        const fmpQuoteMap = Object.assign({}, ...fmpQuoteMaps);
 
-        const survivors = presurvivors.filter(sym => {
-          if (!filterSector) return true;
-          return (profileMap[sym]?.sector || '') === filterSector;
-        });
+        // Sector filter was already applied universe-side. No second pass needed.
+        const survivors = presurvivors;
         if (!survivors.length) return Response.json([]);
 
         const scoringInput = survivors.map(sym => {
@@ -437,11 +547,16 @@ export default async (req) => {
           };
         });
 
-        // Warm-cache lookup: inject filing_drift / hedging_delta if FilingPanel
-        // has previously fetched this ticker's 10-K within the TTL window.
-        const filingCache = await loadFilingCache(scoringInput.map(s => s.ticker));
+        // Warm-cache lookup: inject filing_drift / hedging_delta and
+        // sentiment_score / recommendation in parallel.
+        const tickers = scoringInput.map(s => s.ticker);
+        const [filingCache, researchCache] = await Promise.all([
+          loadFilingCache(tickers),
+          loadResearchCache(tickers),
+        ]);
         for (const s of scoringInput) {
           s.metrics = injectFilingMetrics(s.metrics, filingCache[s.ticker]);
+          s.metrics = injectResearchMetrics(s.metrics, researchCache[s.ticker]);
         }
 
         const scores  = scoreUniverse(scoringInput, profileName);
@@ -468,13 +583,18 @@ export default async (req) => {
       }, { status: 503 });
     }
 
-    const [profileMap, fmpQuoteMap] = await Promise.all([
-      fmpBatch('profile', UNIVERSE, fmpKey),
-      fmpBatch('quote',   UNIVERSE, fmpKey),
+    // Sector filter already applied universe-side via loadUniverse() — only
+    // pay FMP costs on the post-filter set.
+    const fmpChunks = chunk(universeSymbols, FMP_BATCH_SIZE);
+    const [profileMaps, fmpQuoteMaps] = await Promise.all([
+      Promise.all(fmpChunks.map(c => fmpBatch('profile', c, fmpKey))),
+      Promise.all(fmpChunks.map(c => fmpBatch('quote',   c, fmpKey))),
     ]);
+    const profileMap  = Object.assign({}, ...profileMaps);
+    const fmpQuoteMap = Object.assign({}, ...fmpQuoteMaps);
 
     const survivors = [];
-    for (const sym of UNIVERSE) {
+    for (const sym of universeSymbols) {
       const p  = profileMap[sym]  || {};
       const fq = fmpQuoteMap[sym] || {};
       const cp = safe(fq.price, 0);
@@ -519,9 +639,14 @@ export default async (req) => {
 
     if (!survivors.length) return Response.json([]);
 
-    const filingCache = await loadFilingCache(survivors.map(s => s.ticker));
+    const tickers = survivors.map(s => s.ticker);
+    const [filingCache, researchCache] = await Promise.all([
+      loadFilingCache(tickers),
+      loadResearchCache(tickers),
+    ]);
     for (const s of survivors) {
       s.metrics = injectFilingMetrics(s.metrics, filingCache[s.ticker]);
+      s.metrics = injectResearchMetrics(s.metrics, researchCache[s.ticker]);
     }
 
     const scores = scoreUniverse(survivors, profileName);
