@@ -4,10 +4,14 @@
   functions = "netlify/functions"
 
 [functions]
-  # Only filings.py is a Python function. It needs the filings package and the
-  # scoring package (filings/score.py imports backend.scoring.version, which
-  # triggers backend/scoring/__init__.py — that init re-exports the rest).
-  included_files = ["backend/__init__.py", "backend/filings/**", "backend/scoring/**"]
+  # Python functions need their backend/ siblings bundled. filings.py and
+  # insider.py both transitively pull in backend/scoring (via version.py).
+  included_files = [
+    "backend/__init__.py",
+    "backend/filings/**",
+    "backend/insider/**",
+    "backend/scoring/**",
+  ]
 
 [dev]
   command = "npm run dev:frontend"

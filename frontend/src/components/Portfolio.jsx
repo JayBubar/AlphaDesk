@@ -8,6 +8,7 @@ import { fmtNum, fmtPct, scoreColor, scoreBg } from '../lib/scoring.js'
 import ScoreBar from './ScoreBar.jsx'
 import FilingPanel from './FilingPanel.jsx'
 import ResearchPanel from './ResearchPanel.jsx'
+import InsiderPanel from './InsiderPanel.jsx'
 import './Portfolio.css'
 
 const WEIGHT_KEYS = ['fundamentals', 'momentum', 'sentiment', 'filingTone', 'insider']
@@ -349,6 +350,7 @@ export default function Portfolio({
                   </div>
                   <FilingPanel ticker={stock.ticker} />
                   <ResearchPanel ticker={stock.ticker} />
+                  <InsiderPanel ticker={stock.ticker} />
                 </div>
               ))}
             </div>

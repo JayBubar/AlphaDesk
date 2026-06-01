@@ -1,0 +1,119 @@
+.insider-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.insider-load-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-body);
+}
+.insider-load-btn:hover {
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
+
+.insider-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 10px;
+}
+
+.insider-loading,
+.insider-error,
+.insider-warn {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.insider-error { color: var(--red); }
+.insider-warn { color: var(--amber); margin-bottom: 8px; }
+
+.insider-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.insider-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.insider-score {
+  font-size: 20px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+.insider-score[data-tier="good"]    { color: var(--green); }
+.insider-score[data-tier="neutral"] { color: var(--gold); }
+.insider-score[data-tier="bad"]     { color: var(--red); }
+
+.insider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.insider-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.ic-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ic-val {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+.ic-val--good { color: var(--green); }
+.ic-val--bad  { color: var(--red); }
+
+.ic-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.insider-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.insider-meta span { flex: 1; }
+.insider-refresh {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.insider-refresh:hover {
+  border-color: var(--gold-border);
+  color: var(--gold);
+}

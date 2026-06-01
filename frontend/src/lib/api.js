@@ -71,3 +71,10 @@ export async function getUniverse({ refresh = false } = {}) {
   if (!res.ok) throw new Error(`Universe fetch failed: ${res.status}`)
   return res.json()
 }
+
+export async function getInsider(ticker, { refresh = false } = {}) {
+  const url = `${BASE}/insider/${ticker.toUpperCase()}${refresh ? '?refresh=1' : ''}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Insider fetch failed: ${res.status}`)
+  return res.json()
+}

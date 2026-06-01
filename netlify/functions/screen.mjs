@@ -86,6 +86,35 @@ function injectResearchMetrics(metrics, cached) {
   };
 }
 
+// ── Insider-score cache ───────────────────────────────────────────────────────
+// Written by netlify/functions/cache-insider.mjs (which InsiderPanel.jsx posts
+// to after EDGAR Form 4 analysis). 7-day TTL — Form 4 activity is bursty but
+// the score smooths over a 90-day lookback so re-pulling weekly is fine.
+const INSIDER_CACHE_STORE = 'insider-scores';
+const INSIDER_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function loadInsiderCache(tickers) {
+  let store;
+  try { store = getStore(INSIDER_CACHE_STORE); } catch { return {}; }
+  const cutoff = Date.now() - INSIDER_CACHE_TTL_MS;
+
+  const entries = await Promise.all(tickers.map(async t => {
+    try {
+      const raw = await store.get(t, { type: 'json' });
+      if (!raw || !raw.cached_at) return [t, null];
+      if (new Date(raw.cached_at).getTime() < cutoff) return [t, null];
+      return [t, raw];
+    } catch { return [t, null]; }
+  }));
+  return Object.fromEntries(entries);
+}
+
+function injectInsiderMetrics(metrics, cached) {
+  if (!cached) return metrics;
+  // Python's InsiderScore.score is already 0..100, higher = more buying.
+  return { ...metrics, insider_activity: cached.score ?? null };
+}
+
 // ── Universe ──────────────────────────────────────────────────────────────────
 // Dynamic universe is fetched from Netlify Blobs (store "universe", key
 // "sp900"), populated by universe.mjs from Wikipedia. Falls back to a small
@@ -152,7 +181,7 @@ const PROFILES = {
       momentum:     { price_position_52w:40, ma_trend:40, price_change:20 },
       sentiment:    { analyst_upside:35, recommendation:25, short_interest:15, sentiment_score:25 },
       filings:      { filing_drift:50, hedging_delta:50 },
-      insider:      { insider_pct:60, inst_pct:40 },
+      insider:      { insider_activity:70, insider_pct:20, inst_pct:10 },
     },
   },
   growth_mid: {
@@ -162,7 +191,7 @@ const PROFILES = {
       momentum:     { price_position_52w:35, ma_trend:40, price_change:25 },
       sentiment:    { analyst_upside:35, recommendation:25, short_interest:15, sentiment_score:25 },
       filings:      { filing_drift:50, hedging_delta:50 },
-      insider:      { insider_pct:60, inst_pct:40 },
+      insider:      { insider_activity:70, insider_pct:20, inst_pct:10 },
     },
   },
   speculative: {
@@ -172,7 +201,7 @@ const PROFILES = {
       momentum:     { price_position_52w:30, ma_trend:40, price_change:30 },
       sentiment:    { analyst_upside:30, recommendation:25, short_interest:20, sentiment_score:25 },
       filings:      { filing_drift:50, hedging_delta:50 },
-      insider:      { insider_pct:60, inst_pct:40 },
+      insider:      { insider_activity:70, insider_pct:20, inst_pct:10 },
     },
   },
   penny: {
@@ -182,7 +211,7 @@ const PROFILES = {
       momentum:     { price_position_52w:30, ma_trend:40, price_change:30 },
       sentiment:    { analyst_upside:30, recommendation:25, short_interest:20, sentiment_score:25 },
       filings:      { filing_drift:50, hedging_delta:50 },
-      insider:      { insider_pct:60, inst_pct:40 },
+      insider:      { insider_activity:70, insider_pct:20, inst_pct:10 },
     },
   },
 };
@@ -207,9 +236,11 @@ const METRIC_DIR = {
   hedging_delta:     -1,
   insider_pct:        1,
   inst_pct:           1,
+  // EDGAR Form 4 buy/sell ratio over 90 days. Already 0..100, higher = better.
+  insider_activity:   1,
 };
 
-const METHODOLOGY_VERSION = '2026.06.1';
+const METHODOLOGY_VERSION = '2026.06.2';
 const PILLARS = ['fundamentals','momentum','sentiment','filings','insider'];
 
 // ── Scoring engine ────────────────────────────────────────────────────────────
@@ -420,6 +451,48 @@ async function fmpBatch(path, symbols, apiKey) {
   }
 }
 
+// ── Earnings calendar ─────────────────────────────────────────────────────────
+// One call covers all symbols for the next 30 days. We index by symbol and keep
+// the earliest upcoming date per ticker. screen.mjs then computes
+// daysToEarnings and emits a flag when < 7 days.
+const EARNINGS_WINDOW_DAYS = 30;
+
+function yyyymmdd(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+async function fetchEarningsMap(apiKey) {
+  if (!apiKey) return {};
+  try {
+    const from = yyyymmdd(new Date());
+    const to   = yyyymmdd(new Date(Date.now() + EARNINGS_WINDOW_DAYS * 86400_000));
+    const url = `${FMP_BASE}/earnings-calendar?from=${from}&to=${to}&apikey=${apiKey}`;
+    const res = await fetch(url);
+    if (!res.ok) return {};
+    const data = await res.json();
+    const map = {};
+    if (Array.isArray(data)) {
+      for (const ev of data) {
+        if (!ev?.symbol || !ev?.date) continue;
+        // Keep the earliest upcoming event per ticker.
+        if (!map[ev.symbol] || ev.date < map[ev.symbol]) map[ev.symbol] = ev.date;
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function buildEarningsFlag(dateStr) {
+  if (!dateStr) return null;
+  const days = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400_000);
+  if (days < 0) return null;
+  if (days <= 7)  return { type: 'warn',  label: `Earnings in ${days}d` };
+  if (days <= 14) return { type: 'info',  label: `Earnings ${days}d` };
+  return null;  // outside actionable window
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 export default async (req) => {
   try {
@@ -447,6 +520,10 @@ export default async (req) => {
     if (!universeEntries.length) return Response.json([]);
 
     const universeSymbols = universeEntries.map(u => u.symbol);
+
+    // Fetch the next 30-day earnings calendar in parallel with Schwab —
+    // it's one HTTP call, zero added latency on the critical path.
+    const earningsPromise = fetchEarningsMap(fmpKey);
 
     // ── Path A: Schwab + FMP ────────────────────────────────────────────────
     if (token) {
@@ -547,31 +624,39 @@ export default async (req) => {
           };
         });
 
-        // Warm-cache lookup: inject filing_drift / hedging_delta and
-        // sentiment_score / recommendation in parallel.
+        // Warm-cache lookup in parallel: filings, research, insider Form 4s,
+        // and the earnings calendar.
         const tickers = scoringInput.map(s => s.ticker);
-        const [filingCache, researchCache] = await Promise.all([
+        const [filingCache, researchCache, insiderCache, earningsMap] = await Promise.all([
           loadFilingCache(tickers),
           loadResearchCache(tickers),
+          loadInsiderCache(tickers),
+          earningsPromise,
         ]);
         for (const s of scoringInput) {
           s.metrics = injectFilingMetrics(s.metrics, filingCache[s.ticker]);
           s.metrics = injectResearchMetrics(s.metrics, researchCache[s.ticker]);
+          s.metrics = injectInsiderMetrics(s.metrics, insiderCache[s.ticker]);
         }
 
         const scores  = scoreUniverse(scoringInput, profileName);
-        return Response.json(scoringInput.map((s, i) => ({
-          ticker:             s.ticker,
-          ...s.surface,
-          scores:             scores[i].pillars,
-          composite:          scores[i].composite,
-          breakdown:          scores[i].breakdown,
-          profile:            scores[i].profile,
-          methodologyVersion: METHODOLOGY_VERSION,
-          dataSource:         'schwab+fmp',
-          flags:              [],
-          why:                `${s.surface.name} (${s.surface.sector}).`,
-        })));
+        return Response.json(scoringInput.map((s, i) => {
+          const nextEarnings = earningsMap[s.ticker] || null;
+          const earningsFlag = buildEarningsFlag(nextEarnings);
+          return {
+            ticker:             s.ticker,
+            ...s.surface,
+            nextEarnings,
+            scores:             scores[i].pillars,
+            composite:          scores[i].composite,
+            breakdown:          scores[i].breakdown,
+            profile:            scores[i].profile,
+            methodologyVersion: METHODOLOGY_VERSION,
+            dataSource:         'schwab+fmp',
+            flags:              earningsFlag ? [earningsFlag] : [],
+            why:                `${s.surface.name} (${s.surface.sector}).`,
+          };
+        }));
       }
       // Schwab call failed (e.g., revoked token); fall through to FMP-only.
     }
@@ -640,28 +725,36 @@ export default async (req) => {
     if (!survivors.length) return Response.json([]);
 
     const tickers = survivors.map(s => s.ticker);
-    const [filingCache, researchCache] = await Promise.all([
+    const [filingCache, researchCache, insiderCache, earningsMap] = await Promise.all([
       loadFilingCache(tickers),
       loadResearchCache(tickers),
+      loadInsiderCache(tickers),
+      earningsPromise,
     ]);
     for (const s of survivors) {
       s.metrics = injectFilingMetrics(s.metrics, filingCache[s.ticker]);
       s.metrics = injectResearchMetrics(s.metrics, researchCache[s.ticker]);
+      s.metrics = injectInsiderMetrics(s.metrics, insiderCache[s.ticker]);
     }
 
     const scores = scoreUniverse(survivors, profileName);
-    return Response.json(survivors.map((s, i) => ({
-      ticker:             s.ticker,
-      ...s.surface,
-      scores:             scores[i].pillars,
-      composite:          scores[i].composite,
-      breakdown:          scores[i].breakdown,
-      profile:            scores[i].profile,
-      methodologyVersion: METHODOLOGY_VERSION,
-      dataSource:         'fmp',
-      flags:              [],
-      why:                `${s.surface.name} (${s.surface.sector}).`,
-    })));
+    return Response.json(survivors.map((s, i) => {
+      const nextEarnings = earningsMap[s.ticker] || null;
+      const earningsFlag = buildEarningsFlag(nextEarnings);
+      return {
+        ticker:             s.ticker,
+        ...s.surface,
+        nextEarnings,
+        scores:             scores[i].pillars,
+        composite:          scores[i].composite,
+        breakdown:          scores[i].breakdown,
+        profile:            scores[i].profile,
+        methodologyVersion: METHODOLOGY_VERSION,
+        dataSource:         'fmp',
+        flags:              earningsFlag ? [earningsFlag] : [],
+        why:                `${s.surface.name} (${s.surface.sector}).`,
+      };
+    }));
 
   } catch (err) {
     return Response.json({ error: err.message, stack: err.stack }, { status: 500 });

@@ -1,0 +1,75 @@
+.sector-heatmap {
+  margin: 16px 0 12px 0;
+}
+
+.sh-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.sh-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sh-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sh-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px;
+}
+
+.sh-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  text-align: left;
+  transition: all 0.15s;
+  font-family: var(--font-body);
+}
+
+.sh-cell:hover:not(:disabled) {
+  border-color: var(--gold-border);
+  transform: translateY(-1px);
+}
+
+.sh-cell.active {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold) inset;
+}
+
+.sh-cell.empty {
+  opacity: 0.45;
+}
+
+.sh-cell-name {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+.sh-cell-score {
+  font-size: 20px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  line-height: 1;
+  margin-top: 2px;
+}
+
+.sh-cell-count {
+  font-size: 10px;
+  opacity: 0.7;
+}

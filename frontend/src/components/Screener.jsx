@@ -7,6 +7,8 @@ import {
 import { PROFILES, PROFILE_KEYS, DEFAULT_PROFILE, getProfile } from '../lib/profiles.js'
 import { storage } from '../lib/storage.js'
 import ScoreBar from './ScoreBar.jsx'
+import SectorHeatmap from './SectorHeatmap.jsx'
+import './SectorHeatmap.css'
 import './Screener.css'
 
 const SECTORS = [
@@ -246,6 +248,15 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
 
       {results && !loading && (
         <section className="results-section">
+          <SectorHeatmap
+            results={results}
+            activeSector={filters.sector}
+            onSectorClick={(sec) => {
+              setFilter('sector', sec)
+              // Re-run with the new sector filter applied.
+              setTimeout(runScreen, 0)
+            }}
+          />
           <div className="results-header">
             <div className="results-stats">
               <span className="stat"><strong>{results.length}</strong> passed filters</span>
