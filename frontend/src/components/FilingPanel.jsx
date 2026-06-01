@@ -13,6 +13,14 @@ export default function FilingPanel({ ticker }) {
     try {
       const result = await getFiling(ticker, { refresh: forceRefresh })
       setData(result)
+      // Fire-and-forget: warm the Netlify Blobs cache so the next /api/screen
+      // run can fold this ticker's filing_drift / hedging_delta into scoring.
+      // Failures here don't surface to the user; the EDGAR result is what matters.
+      fetch('/api/cache-filing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker, payload: result }),
+      }).catch(() => {})
     } catch (e) {
       setError(e.message)
     } finally {

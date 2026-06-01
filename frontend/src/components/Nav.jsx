@@ -44,6 +44,12 @@ export default function Nav({ view, setView, watchlistCount }) {
             <span className="nav-badge">{watchlistCount}</span>
           )}
         </button>
+        <button
+          className={`nav-btn ${view === 'signals' ? 'active' : ''}`}
+          onClick={() => setView('signals')}
+        >
+          Signals
+        </button>
       </nav>
 
       <div className="nav-status">

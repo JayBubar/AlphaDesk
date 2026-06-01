@@ -12,6 +12,43 @@
  * of which data source is used.
  */
 import { getSchwabToken } from './shared/schwab-token.mjs';
+import { getStore } from '@netlify/blobs';
+
+// ── Filing-score cache ────────────────────────────────────────────────────────
+// Written by netlify/functions/cache-filing.mjs (which FilingPanel.jsx calls
+// after a manual /api/filings/{ticker} fetch). 30-day TTL since 10-Ks are
+// annual filings — anything older is likely a new fiscal year.
+const FILING_CACHE_STORE = 'filing-scores';
+const FILING_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function loadFilingCache(tickers) {
+  let store;
+  try { store = getStore(FILING_CACHE_STORE); } catch { return {}; }
+  const cutoff = Date.now() - FILING_CACHE_TTL_MS;
+
+  const entries = await Promise.all(tickers.map(async t => {
+    try {
+      const raw = await store.get(t, { type: 'json' });
+      if (!raw || !raw.cached_at) return [t, null];
+      if (new Date(raw.cached_at).getTime() < cutoff) return [t, null];
+      return [t, raw];
+    } catch { return [t, null]; }
+  }));
+  return Object.fromEntries(entries);
+}
+
+function injectFilingMetrics(metrics, cached) {
+  if (!cached) return metrics;
+  // Python's FilingScore has risk_drift and mda_drift separately. The screen
+  // engine expects a single filing_drift metric — average whichever are present.
+  const drifts = [cached.risk_drift, cached.mda_drift].filter(v => v != null);
+  const filing_drift = drifts.length ? drifts.reduce((s, v) => s + v, 0) / drifts.length : null;
+  return {
+    ...metrics,
+    filing_drift,
+    hedging_delta: cached.hedging_delta ?? null,
+  };
+}
 
 // ── Universe ──────────────────────────────────────────────────────────────────
 const UNIVERSE = [
@@ -307,6 +344,7 @@ export default async (req) => {
     const priceMax     = parseFloat(sp.get('priceMax') || '99999');
     const volMin       = parseFloat(sp.get('volMin')   || '0') * 1000;
     const betaMax      = parseFloat(sp.get('betaMax')  || '5');
+    const peMax        = parseFloat(sp.get('peMax')    || '100');
     const profileName  = sp.get('profile') || 'growth_mid';
 
     const fmpKey = process.env.FMP_API_KEY || '';
@@ -339,10 +377,12 @@ export default async (req) => {
           const vol  = safe(q.totalVolume, 0);
           const beta = safe(f.beta,        0);
           const mcap = safe(f.marketCap,   0);
+          const pe   = safe(f.peRatio);
 
           if (cp   < priceMin || cp > priceMax) continue;
           if (vol  < volMin)                    continue;
           if (beta && beta > betaMax)           continue;
+          if (pe   != null && pe > peMax)       continue;
           if (filterCap && CAP_RANGES[filterCap]) {
             const [lo, hi] = CAP_RANGES[filterCap];
             if (mcap < lo || mcap > hi) continue;
@@ -397,6 +437,13 @@ export default async (req) => {
           };
         });
 
+        // Warm-cache lookup: inject filing_drift / hedging_delta if FilingPanel
+        // has previously fetched this ticker's 10-K within the TTL window.
+        const filingCache = await loadFilingCache(scoringInput.map(s => s.ticker));
+        for (const s of scoringInput) {
+          s.metrics = injectFilingMetrics(s.metrics, filingCache[s.ticker]);
+        }
+
         const scores  = scoreUniverse(scoringInput, profileName);
         return Response.json(scoringInput.map((s, i) => ({
           ticker:             s.ticker,
@@ -443,6 +490,7 @@ export default async (req) => {
       if (cp < priceMin || cp > priceMax)        continue;
       if (vol && vol < volMin)                    continue;
       if (beta && beta > betaMax)                 continue;
+      if (pe != null && pe > peMax)               continue;
       if (filterCap && CAP_RANGES[filterCap]) {
         const [lo, hi] = CAP_RANGES[filterCap];
         if (mcap < lo || mcap > hi) continue;
@@ -470,6 +518,11 @@ export default async (req) => {
     }
 
     if (!survivors.length) return Response.json([]);
+
+    const filingCache = await loadFilingCache(survivors.map(s => s.ticker));
+    for (const s of survivors) {
+      s.metrics = injectFilingMetrics(s.metrics, filingCache[s.ticker]);
+    }
 
     const scores = scoreUniverse(survivors, profileName);
     return Response.json(survivors.map((s, i) => ({

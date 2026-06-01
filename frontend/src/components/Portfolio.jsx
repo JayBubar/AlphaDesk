@@ -1,14 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import {
   PieChart, Pie, Cell,
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer
 } from 'recharts'
-import { refreshPrices } from '../lib/api.js'
 import { fmtNum, fmtPct, scoreColor, scoreBg } from '../lib/scoring.js'
-import { storage } from '../lib/storage.js'
 import ScoreBar from './ScoreBar.jsx'
-import Signals from './Signals.jsx'
 import FilingPanel from './FilingPanel.jsx'
 import './Portfolio.css'
 
@@ -38,35 +35,20 @@ const ChartTooltip = ({ active, payload, label }) => {
   )
 }
 
-export default function Portfolio({ watchlist, onRemoveFromWatchlist }) {
-  const [positions, setPositions]     = useState(() => storage.loadPositions())
-  const [livePrice, setLivePrice]     = useState({})
-  const [refreshing, setRefreshing]   = useState(false)
-  const [lastRefresh, setLastRefresh] = useState(null)
+export default function Portfolio({
+  watchlist,
+  onRemoveFromWatchlist,
+  positions,
+  setPositions,
+  livePrice,
+  refreshAllPrices,
+  refreshing,
+  lastRefresh,
+}) {
   const [editTicker, setEditTicker]   = useState(null)
   const [editShares, setEditShares]   = useState('')
   const [editCost, setEditCost]       = useState('')
   const [activeTab, setActiveTab]     = useState('positions')
-
-  useEffect(() => { storage.savePositions(positions) }, [positions])
-
-  useEffect(() => {
-    if (watchlist.length > 0) refreshAllPrices()
-  }, [watchlist.length])
-
-  const refreshAllPrices = useCallback(async () => {
-    if (!watchlist.length) return
-    setRefreshing(true)
-    try {
-      const data = await refreshPrices(watchlist.map(s => s.ticker))
-      setLivePrice(data)
-      setLastRefresh(new Date())
-    } catch (e) {
-      console.error('Price refresh failed:', e)
-    } finally {
-      setRefreshing(false)
-    }
-  }, [watchlist])
 
   function openEdit(ticker) {
     const p = positions[ticker] || {}
@@ -185,7 +167,7 @@ export default function Portfolio({ watchlist, onRemoveFromWatchlist }) {
       ) : (
         <>
           <div className="tab-bar">
-            {['positions', 'charts', 'scores', 'signals'].map(t => (
+            {['positions', 'charts', 'scores'].map(t => (
               <button key={t}
                 className={`tab-btn ${activeTab === t ? 'active' : ''}`}
                 onClick={() => setActiveTab(t)}>
@@ -370,13 +352,6 @@ export default function Portfolio({ watchlist, onRemoveFromWatchlist }) {
             </div>
           )}
 
-          {activeTab === 'signals' && (
-            <Signals
-              watchlist={watchlist}
-              positions={positions}
-              livePrices={livePrice}
-            />
-          )}
         </>
       )}
 
