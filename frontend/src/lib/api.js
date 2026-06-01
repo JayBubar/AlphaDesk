@@ -78,3 +78,21 @@ export async function getInsider(ticker, { refresh = false } = {}) {
   if (!res.ok) throw new Error(`Insider fetch failed: ${res.status}`)
   return res.json()
 }
+
+export async function getHoldings({ refresh = false } = {}) {
+  const url = `${BASE}/holdings${refresh ? '?refresh=1' : ''}`
+  const res = await fetch(url)
+  if (res.status === 401) {
+    const err = new Error('Schwab not connected')
+    err.status = 401
+    throw err
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    const err = new Error(body.error || `Holdings fetch failed: ${res.status}`)
+    err.status = res.status
+    err.detail = body.detail
+    throw err
+  }
+  return res.json()
+}

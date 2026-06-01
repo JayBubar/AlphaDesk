@@ -33,7 +33,11 @@ export default async (req) => {
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('client_id', clientId);
     authUrl.searchParams.set('redirect_uri', redirectUri);
-    // Schwab does not use a scope param for the basic market-data grant
+    // scope=readonly is largely cosmetic in Schwab's OAuth — the actual
+    // permissions come from the product entitlements attached to the app
+    // (Market Data Production + Accounts and Trading Production). We send
+    // it anyway as good OAuth hygiene; harmless if ignored.
+    authUrl.searchParams.set('scope', 'readonly');
     return Response.redirect(authUrl.toString(), 302);
   }
 

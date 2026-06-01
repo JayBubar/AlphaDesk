@@ -1,22 +1,18 @@
 import { useEffect, useState } from 'react'
-import { getSchwabStatus, connectSchwab } from '../lib/api'
+import { connectSchwab } from '../lib/api'
 import './Nav.css'
 
-export default function Nav({ view, setView, watchlistCount }) {
-  const [schwab, setSchwab] = useState(null)   // null = loading, true/false = status
-  const [toast, setToast]   = useState('')
+export default function Nav({ view, setView, watchlistCount, schwabConnected }) {
+  const [toast, setToast] = useState('')
 
   useEffect(() => {
-    // Check for ?schwab=connected redirect from OAuth callback
+    // Detect ?schwab=connected redirect from OAuth callback.
     const params = new URLSearchParams(window.location.search)
     if (params.get('schwab') === 'connected') {
-      setToast('Schwab connected ✓')
+      setToast('Schwab connected ✓ — syncing holdings…')
       setTimeout(() => setToast(''), 4000)
-      // Clean the URL
       window.history.replaceState({}, '', window.location.pathname)
     }
-
-    getSchwabStatus().then(s => setSchwab(s.connected))
   }, [])
 
   return (
@@ -53,7 +49,7 @@ export default function Nav({ view, setView, watchlistCount }) {
       </nav>
 
       <div className="nav-status">
-        {schwab === null ? null : schwab ? (
+        {schwabConnected === null ? null : schwabConnected ? (
           <>
             <span className="status-dot status-dot--schwab" />
             <span className="status-text">Schwab live</span>

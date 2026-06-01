@@ -257,3 +257,66 @@
 .sc-val { font-family: var(--font-mono); font-size: 12px; width: 24px; text-align: right; flex-shrink: 0; }
 .score-card-why { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-bottom: 10px; }
 .score-card-flags { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* Schwab live-sync UI */
+.schwab-sync-btn {
+  background: rgba(62, 207, 142, 0.1);
+  border-color: rgba(62, 207, 142, 0.3);
+  color: var(--green);
+}
+.schwab-sync-btn:hover:not(:disabled) {
+  border-color: var(--green);
+}
+.schwab-sync-time {
+  color: var(--green);
+}
+.schwab-error-banner {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: var(--red);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  margin: 0 0 12px 0;
+}
+
+.live-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: rgba(62, 207, 142, 0.18);
+  color: var(--green);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.asset-type-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.port-row--noscore {
+  opacity: 0.85;
+}
+.score-chip--na {
+  color: var(--text-muted);
+  background: var(--bg-input);
+  font-weight: 400;
+}
+
+.edit-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

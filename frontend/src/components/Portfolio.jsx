@@ -37,6 +37,17 @@ const ChartTooltip = ({ active, payload, label }) => {
   )
 }
 
+function relativeTime(iso) {
+  if (!iso) return null
+  const elapsedMs = Date.now() - new Date(iso).getTime()
+  if (elapsedMs < 60_000) return 'just now'
+  const mins = Math.floor(elapsedMs / 60_000)
+  if (mins < 60) return `${mins} min ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
 export default function Portfolio({
   watchlist,
   onRemoveFromWatchlist,
@@ -46,6 +57,11 @@ export default function Portfolio({
   refreshAllPrices,
   refreshing,
   lastRefresh,
+  schwabConnected,
+  schwabSyncing,
+  schwabError,
+  schwabLastSync,
+  onSchwabSync,
 }) {
   const [editTicker, setEditTicker]   = useState(null)
   const [editShares, setEditShares]   = useState('')
@@ -73,16 +89,23 @@ export default function Portfolio({
     setEditTicker(null)
   }
 
-  // Enrich each watchlist item with live price + position data
+  // Enrich each watchlist item with live price + position data.
+  // Schwab-sourced positions carry authoritative current price + market value
+  // straight from the broker; those override the /api/prices snapshot.
   const rows = watchlist.map(s => {
-    const price    = livePrice[s.ticker]?.price ?? s.price ?? 0
-    const change   = livePrice[s.ticker]?.change ?? s.change ?? 0
     const pos      = positions[s.ticker]
-    const mktValue = pos?.shares ? pos.shares * price : 0
+    const isLive   = pos?.source === 'schwab'
+    const price    = (isLive && pos.currentPrice != null) ? pos.currentPrice
+                   : livePrice[s.ticker]?.price ?? s.price ?? 0
+    const change   = livePrice[s.ticker]?.change ?? s.change ?? 0
+    const mktValue = isLive && pos.marketValue != null
+                     ? pos.marketValue
+                     : (pos?.shares ? pos.shares * price : 0)
     const cost     = pos?.shares ? pos.shares * pos.costBasis : 0
-    const gainAbs  = mktValue - cost
-    const gainPct  = cost > 0 ? (gainAbs / cost) * 100 : 0
-    return { ...s, price, change, pos, mktValue, cost, gainAbs, gainPct }
+    const gainAbs  = isLive && pos.gainLoss != null ? pos.gainLoss : (mktValue - cost)
+    const gainPct  = isLive && pos.gainLossPct != null ? pos.gainLossPct
+                   : (cost > 0 ? (gainAbs / cost) * 100 : 0)
+    return { ...s, price, change, pos, mktValue, cost, gainAbs, gainPct, isLive }
   })
 
   const totalValue   = rows.reduce((s, r) => s + r.mktValue, 0)
@@ -129,12 +152,29 @@ export default function Portfolio({
           <p className="page-subtitle">Watchlist · positions · P&amp;L · analytics</p>
         </div>
         <div className="header-actions">
-          {lastRefresh && <span className="last-refresh">Updated {lastRefresh.toLocaleTimeString()}</span>}
+          {schwabConnected && (
+            <>
+              {schwabLastSync && (
+                <span className="last-refresh schwab-sync-time">
+                  Schwab synced {relativeTime(schwabLastSync)}
+                </span>
+              )}
+              <button className="refresh-btn schwab-sync-btn" onClick={onSchwabSync}
+                disabled={schwabSyncing} title="Re-pull positions from Schwab">
+                {schwabSyncing ? 'Syncing…' : 'Sync Schwab'}
+              </button>
+            </>
+          )}
+          {lastRefresh && <span className="last-refresh">Quotes {lastRefresh.toLocaleTimeString()}</span>}
           <button className="refresh-btn" onClick={refreshAllPrices} disabled={refreshing}>
             {refreshing ? 'Refreshing…' : 'Refresh prices'}
           </button>
         </div>
       </div>
+
+      {schwabError && (
+        <div className="schwab-error-banner">{schwabError}</div>
+      )}
 
       {/* Summary cards */}
       <div className="summary-cards">
@@ -191,19 +231,29 @@ export default function Portfolio({
                 </thead>
                 <tbody>
                   {rows.map(r => (
-                    <tr key={r.ticker} className="port-row">
+                    <tr key={r.ticker} className={`port-row${r.noScore ? ' port-row--noscore' : ''}`}>
                       <td>
-                        <div className="ticker-sym">{r.ticker}</div>
+                        <div className="ticker-sym">
+                          {r.ticker}
+                          {r.isLive && <span className="live-badge" title={`Schwab ${r.pos?.accountNumber || ''} · ${r.pos?.assetType || ''}`}>LIVE</span>}
+                          {r.noScore && r.pos?.assetType && r.pos.assetType !== 'EQUITY' && (
+                            <span className="asset-type-badge">{r.pos.assetType}</span>
+                          )}
+                        </div>
                         <div className="ticker-name">{r.name}</div>
                       </td>
                       <td>
-                        <span className="score-chip"
-                          style={{ color: scoreColor(r.composite ?? 0), background: scoreBg(r.composite ?? 0) }}>
-                          {r.composite ?? '—'}
-                        </span>
+                        {r.noScore ? (
+                          <span className="score-chip score-chip--na" title="ETFs and mutual funds aren't scored">—</span>
+                        ) : (
+                          <span className="score-chip"
+                            style={{ color: scoreColor(r.composite ?? 0), background: scoreBg(r.composite ?? 0) }}>
+                            {r.composite ?? '—'}
+                          </span>
+                        )}
                       </td>
                       <td className="mono">
-                        {refreshing ? <span style={{ color: 'var(--text-muted)' }}>…</span> : `$${fmtNum(r.price)}`}
+                        {refreshing && !r.isLive ? <span style={{ color: 'var(--text-muted)' }}>…</span> : `$${fmtNum(r.price)}`}
                       </td>
                       <td className="mono" style={{ color: r.change >= 0 ? 'var(--green)' : 'var(--red)' }}>
                         {r.change != null ? fmtPct(r.change) : '—'}
@@ -220,15 +270,23 @@ export default function Portfolio({
                         ) : '—'}
                       </td>
                       <td>
-                        <div className="mini-bars">
-                          {WEIGHT_KEYS.map(k => (
-                            <ScoreBar key={k} label={k.slice(0, 4)} value={r.scores?.[k] ?? 0} />
-                          ))}
-                        </div>
+                        {r.noScore ? (
+                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>n/a</span>
+                        ) : (
+                          <div className="mini-bars">
+                            {WEIGHT_KEYS.map(k => (
+                              <ScoreBar key={k} label={k.slice(0, 4)} value={r.scores?.[k] ?? 0} />
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td>
                         <div className="port-actions">
-                          <button className="edit-btn" onClick={() => openEdit(r.ticker)} title="Enter position">✎</button>
+                          <button className="edit-btn" onClick={() => openEdit(r.ticker)}
+                            title={r.isLive ? 'Schwab-synced — edits will be overwritten on next sync' : 'Enter position'}
+                            disabled={r.isLive}>
+                            ✎
+                          </button>
                           <button className="remove-btn" onClick={() => onRemoveFromWatchlist(r.ticker)} title="Remove">✕</button>
                         </div>
                       </td>
