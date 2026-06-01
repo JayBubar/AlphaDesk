@@ -1,1 +1,2 @@
-yfinance==0.2.40
+# filings.py uses backend.filings, which is pure Python stdlib.
+# No third-party deps required.
