@@ -8,6 +8,7 @@ const KEY = {
   weights:   'alphadesk:weights:v1',
   scoreHistory: 'alphadesk:scoreHistory:v1',
   schwabSuppressed: 'alphadesk:schwabSuppressed:v1',
+  favorites: 'alphadesk:favorites:v1',
 }
 
 function read(key, fallback) {
@@ -60,4 +61,10 @@ export const storage = {
   // silently re-add on the next sync.
   loadSchwabSuppressed: () => read(KEY.schwabSuppressed, []),
   saveSchwabSuppressed: (tickers) => write(KEY.schwabSuppressed, tickers),
+
+  // Starred tickers — the Signals tab shows only these. Stars work across
+  // both the watchlist and the portfolio; same ticker can be in either or
+  // both and still be a single star.
+  loadFavorites: () => read(KEY.favorites, []),
+  saveFavorites: (tickers) => write(KEY.favorites, tickers),
 }

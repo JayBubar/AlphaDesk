@@ -1,23 +1,43 @@
-import { useState } from 'react'
+/**
+ * Portfolio — Schwab-synced holdings only.
+ *
+ * No manual entry: positions come exclusively from the /api/holdings sync.
+ * Research panels (FilingPanel / ResearchPanel / InsiderPanel / BacktestPanel)
+ * live in the row expand-out and are collapsed by default since the primary
+ * use case here is P&L tracking, not research.
+ *
+ * Stars work across both tabs; this row also exposes the star toggle so you
+ * can favorite a current holding for the Signals tab.
+ */
+import { useState, Fragment } from 'react'
 import {
   PieChart, Pie, Cell,
   BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer
+  ResponsiveContainer,
 } from 'recharts'
 import { fmtNum, fmtPct, scoreColor, scoreBg } from '../lib/scoring.js'
-import ScoreBar from './ScoreBar.jsx'
+import StarButton from './StarButton.jsx'
 import FilingPanel from './FilingPanel.jsx'
 import ResearchPanel from './ResearchPanel.jsx'
 import InsiderPanel from './InsiderPanel.jsx'
 import BacktestPanel from './BacktestPanel.jsx'
 import './Portfolio.css'
 
-const WEIGHT_KEYS = ['fundamentals', 'momentum', 'sentiment', 'filingTone', 'insider']
-
 const SECTOR_COLORS = [
   '#c9a84c', '#60a5fa', '#3ecf8e', '#f87171', '#a78bfa',
-  '#fb923c', '#34d399', '#f472b6', '#38bdf8', '#facc15'
+  '#fb923c', '#34d399', '#f472b6', '#38bdf8', '#facc15',
 ]
+
+function relativeTime(iso) {
+  if (!iso) return null
+  const elapsedMs = Date.now() - new Date(iso).getTime()
+  if (elapsedMs < 60_000) return 'just now'
+  const mins = Math.floor(elapsedMs / 60_000)
+  if (mins < 60) return `${mins} min ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
 
 const ChartTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
@@ -38,22 +58,8 @@ const ChartTooltip = ({ active, payload, label }) => {
   )
 }
 
-function relativeTime(iso) {
-  if (!iso) return null
-  const elapsedMs = Date.now() - new Date(iso).getTime()
-  if (elapsedMs < 60_000) return 'just now'
-  const mins = Math.floor(elapsedMs / 60_000)
-  if (mins < 60) return `${mins} min ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
-}
-
 export default function Portfolio({
-  watchlist,
-  onRemoveFromWatchlist,
   positions,
-  setPositions,
   livePrice,
   refreshAllPrices,
   refreshing,
@@ -65,99 +71,80 @@ export default function Portfolio({
   onSchwabSync,
   schwabSuppressed = [],
   onUnsuppressSchwab,
+  onSuppressPosition,
+  favorites,
+  onToggleFavorite,
 }) {
-  const [editTicker, setEditTicker]   = useState(null)
-  const [editShares, setEditShares]   = useState('')
-  const [editCost, setEditCost]       = useState('')
-  const [activeTab, setActiveTab]     = useState('positions')
+  const [activeTab, setActiveTab] = useState('positions')
+  const [expanded, setExpanded] = useState(null)
   const [showSuppressed, setShowSuppressed] = useState(false)
 
-  // Counts for the "12 watchlist · 3 from Schwab" origin breakdown.
-  const schwabCount = watchlist.filter(s => s.source === 'schwab').length
-  const manualCount = watchlist.length - schwabCount
+  // Only Schwab-sourced positions render in Portfolio. Legacy manual entries
+  // (no source flag) stay in localStorage but don't appear here.
+  const schwabTickers = Object.keys(positions).filter(t => positions[t]?.source === 'schwab')
 
-  function openEdit(ticker) {
-    const p = positions[ticker] || {}
-    setEditTicker(ticker)
-    setEditShares(p.shares ?? '')
-    setEditCost(p.costBasis ?? '')
-  }
-
-  function saveEdit() {
-    if (!editTicker) return
-    setPositions(prev => ({
-      ...prev,
-      [editTicker]: {
-        shares: parseFloat(editShares) || 0,
-        costBasis: parseFloat(editCost) || 0,
-        entryDate: prev[editTicker]?.entryDate || new Date().toISOString().split('T')[0],
-        entryScore: prev[editTicker]?.entryScore || 0,
-      }
-    }))
-    setEditTicker(null)
-  }
-
-  // Enrich each watchlist item with live price + position data.
-  // Schwab-sourced positions carry authoritative current price + market value
-  // straight from the broker; those override the /api/prices snapshot.
-  const rows = watchlist.map(s => {
-    const pos      = positions[s.ticker]
-    const isLive   = pos?.source === 'schwab'
-    const price    = (isLive && pos.currentPrice != null) ? pos.currentPrice
-                   : livePrice[s.ticker]?.price ?? s.price ?? 0
-    const change   = livePrice[s.ticker]?.change ?? s.change ?? 0
-    const mktValue = isLive && pos.marketValue != null
-                     ? pos.marketValue
-                     : (pos?.shares ? pos.shares * price : 0)
-    const cost     = pos?.shares ? pos.shares * pos.costBasis : 0
-    const gainAbs  = isLive && pos.gainLoss != null ? pos.gainLoss : (mktValue - cost)
-    const gainPct  = isLive && pos.gainLossPct != null ? pos.gainLossPct
-                   : (cost > 0 ? (gainAbs / cost) * 100 : 0)
-    return { ...s, price, change, pos, mktValue, cost, gainAbs, gainPct, isLive }
+  const rows = schwabTickers.map(ticker => {
+    const pos = positions[ticker]
+    const isEquity = pos.assetType === 'EQUITY'
+    // Schwab's currentPrice is authoritative; livePrice from /api/prices is
+    // a fallback if Schwab's snapshot is stale.
+    const price = pos.currentPrice ?? livePrice[ticker]?.price ?? 0
+    const change = livePrice[ticker]?.change ?? null
+    return {
+      ticker,
+      name: pos.name || ticker,
+      pos,
+      isEquity,
+      price,
+      change,
+      shares: pos.shares,
+      costBasis: pos.costBasis,
+      mktValue: pos.marketValue ?? (pos.shares * price),
+      gainAbs:  pos.gainLoss ?? 0,
+      gainPct:  pos.gainLossPct ?? 0,
+      assetType: pos.assetType || 'EQUITY',
+      accountNumber: pos.accountNumber,
+    }
   })
 
-  const totalValue   = rows.reduce((s, r) => s + r.mktValue, 0)
-  const totalCost    = rows.reduce((s, r) => s + r.cost, 0)
-  const totalGain    = totalValue - totalCost
+  const totalValue = rows.reduce((s, r) => s + (r.mktValue || 0), 0)
+  const totalCost  = rows.reduce((s, r) => s + (r.shares * r.costBasis || 0), 0)
+  const totalGain  = totalValue - totalCost
   const totalGainPct = totalCost > 0 ? (totalGain / totalCost) * 100 : 0
-  const positionedCount = rows.filter(r => r.pos?.shares > 0).length
 
   const dayChange = rows.reduce((s, r) => {
-    if (!r.pos?.shares || !r.price) return s
+    if (!r.shares || !r.price || r.change == null) return s
     const prev = r.price / (1 + (r.change || 0) / 100)
-    return s + r.pos.shares * (r.price - prev)
+    return s + r.shares * (r.price - prev)
   }, 0)
 
-  // Sector pie data (only positioned stocks)
-  const sectorMap = {}
+  // Sector pie (Schwab doesn't give sector — leave for v2; show asset-type pie instead).
+  const assetTypeMap = {}
   rows.forEach(r => {
     if (!r.mktValue) return
-    const sec = r.sector || 'Other'
-    sectorMap[sec] = (sectorMap[sec] || 0) + r.mktValue
+    const key = r.assetType || 'OTHER'
+    assetTypeMap[key] = (assetTypeMap[key] || 0) + r.mktValue
   })
-  const sectorData = Object.entries(sectorMap).map(([name, value]) => ({
+  const assetTypeData = Object.entries(assetTypeMap).map(([name, value]) => ({
     name, value: +value.toFixed(2),
-    pct: totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) : '0'
+    pct: totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) : '0',
   }))
 
-  // P&L bar data
   const glData = rows
-    .filter(r => r.pos?.shares > 0)
-    .map(r => ({ ticker: r.ticker, gain: +r.gainAbs.toFixed(2) }))
+    .filter(r => r.shares > 0)
+    .map(r => ({ ticker: r.ticker, gain: +(r.gainAbs || 0).toFixed(2) }))
     .sort((a, b) => b.gain - a.gain)
-
-  // Score comparison data
-  const scoreData = watchlist.map(s => ({
-    ticker: s.ticker,
-    Score: s.composite ?? 0,
-  }))
 
   return (
     <div className="portfolio">
       <div className="portfolio-header">
         <div>
           <h1 className="page-title">Portfolio <em>Tracker</em></h1>
-          <p className="page-subtitle">Watchlist · positions · P&amp;L · analytics</p>
+          <p className="page-subtitle">
+            {schwabConnected
+              ? `${rows.length} live Schwab holdings`
+              : 'Connect Schwab to sync your portfolio'}
+          </p>
         </div>
         <div className="header-actions">
           {(lastRefresh || schwabLastSync) && (
@@ -192,26 +179,20 @@ export default function Portfolio({
         <div className="schwab-error-banner">{schwabError}</div>
       )}
 
-      {schwabConnected && (schwabCount > 0 || schwabSuppressed.length > 0) && (
+      {schwabConnected && schwabSuppressed.length > 0 && (
         <div className="schwab-origin-bar">
-          <span className="origin-summary">
-            {watchlist.length} watchlist
-            {schwabCount > 0 && <> · <strong>{schwabCount} from Schwab</strong></>}
-            {manualCount > 0 && schwabCount > 0 && <> · {manualCount} manual</>}
-          </span>
-          {schwabSuppressed.length > 0 && (
-            <button className="origin-suppressed-btn"
-              onClick={() => setShowSuppressed(s => !s)}>
-              {schwabSuppressed.length} excluded from sync {showSuppressed ? '▲' : '▼'}
-            </button>
-          )}
+          <span className="origin-summary">{rows.length} live positions</span>
+          <button className="origin-suppressed-btn"
+            onClick={() => setShowSuppressed(s => !s)}>
+            {schwabSuppressed.length} hidden {showSuppressed ? '▲' : '▼'}
+          </button>
         </div>
       )}
 
       {showSuppressed && schwabSuppressed.length > 0 && (
         <div className="schwab-suppressed-panel">
           <div className="suppressed-title">
-            Tickers excluded from Schwab sync
+            Hidden Schwab positions
             <span className="suppressed-hint">click to re-include and trigger sync</span>
           </div>
           <div className="suppressed-chips">
@@ -226,7 +207,6 @@ export default function Portfolio({
         </div>
       )}
 
-      {/* Summary cards */}
       <div className="summary-cards">
         <div className="sum-card">
           <span className="sum-label">Portfolio value</span>
@@ -246,20 +226,29 @@ export default function Portfolio({
           </span>
         </div>
         <div className="sum-card">
-          <span className="sum-label">Positions entered</span>
-          <span className="sum-val">{positionedCount} of {watchlist.length}</span>
+          <span className="sum-label">Positions</span>
+          <span className="sum-val">{rows.length}</span>
         </div>
       </div>
 
-      {watchlist.length === 0 ? (
+      {rows.length === 0 ? (
         <div className="empty-portfolio">
-          <p className="empty-title">No stocks on watchlist yet.</p>
-          <p className="empty-sub">Use the Screener tab to find and add stocks.</p>
+          {!schwabConnected ? (
+            <>
+              <p className="empty-title">Connect Schwab to populate the portfolio.</p>
+              <p className="empty-sub">Use the Connect button in the top right.</p>
+            </>
+          ) : (
+            <>
+              <p className="empty-title">No Schwab positions yet.</p>
+              <p className="empty-sub">Try the Sync Schwab button — or check that account holdings are visible in Schwab.</p>
+            </>
+          )}
         </div>
       ) : (
         <>
           <div className="tab-bar">
-            {['positions', 'charts', 'scores'].map(t => (
+            {['positions', 'charts'].map(t => (
               <button key={t}
                 className={`tab-btn ${activeTab === t ? 'active' : ''}`}
                 onClick={() => setActiveTab(t)}>
@@ -268,113 +257,143 @@ export default function Portfolio({
             ))}
           </div>
 
-          {/* ── POSITIONS TAB ── */}
           {activeTab === 'positions' && (
             <div className="portfolio-table-wrap">
               <table className="portfolio-table">
                 <thead>
                   <tr>
-                    <th>Ticker</th><th>Score</th><th>Price</th>
-                    <th>Day</th><th>Shares</th><th>Cost</th>
-                    <th>Value</th><th>Gain / loss</th><th>Pillars</th><th></th>
+                    <th className="th-star"></th>
+                    <th>Ticker</th>
+                    <th>Type</th>
+                    <th>Price</th>
+                    <th>Day</th>
+                    <th>Shares</th>
+                    <th>Cost</th>
+                    <th>Value</th>
+                    <th>Gain / loss</th>
+                    <th>Account</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map(r => (
-                    <tr key={r.ticker} className={`port-row${r.noScore ? ' port-row--noscore' : ''}`}>
-                      <td>
-                        <div className="ticker-sym">
-                          {r.ticker}
-                          {r.isLive && <span className="live-badge" title={`Schwab ${r.pos?.accountNumber || ''} · ${r.pos?.assetType || ''}`}>LIVE</span>}
-                          {r.noScore && r.pos?.assetType && r.pos.assetType !== 'EQUITY' && (
-                            <span className="asset-type-badge">{r.pos.assetType}</span>
-                          )}
-                        </div>
-                        <div className="ticker-name">{r.name}</div>
-                      </td>
-                      <td>
-                        {r.noScore ? (
-                          <span className="score-chip score-chip--na" title="ETFs and mutual funds aren't scored">—</span>
-                        ) : (
-                          <span className="score-chip"
-                            style={{ color: scoreColor(r.composite ?? 0), background: scoreBg(r.composite ?? 0) }}>
-                            {r.composite ?? '—'}
-                          </span>
+                  {rows.map(r => {
+                    const isOpen = expanded === r.ticker
+                    const isStarred = favorites?.has(r.ticker)
+                    return (
+                      <Fragment key={r.ticker}>
+                        <tr className={`port-row ${isOpen ? 'expanded' : ''}`}
+                          onClick={() => setExpanded(isOpen ? null : r.ticker)}>
+                          <td className="td-star" onClick={(e) => e.stopPropagation()}>
+                            <StarButton active={isStarred}
+                              onToggle={() => onToggleFavorite(r.ticker)} />
+                          </td>
+                          <td>
+                            <div className="ticker-sym">
+                              {r.ticker}
+                              <span className="live-badge"
+                                title={`Schwab ${r.accountNumber || ''} · ${r.assetType}`}>LIVE</span>
+                            </div>
+                            <div className="ticker-name">{r.name}</div>
+                          </td>
+                          <td>
+                            <span className={`asset-type-badge ${r.isEquity ? 'asset-type-badge--equity' : ''}`}>
+                              {r.assetType}
+                            </span>
+                          </td>
+                          <td className="mono">${fmtNum(r.price)}</td>
+                          <td className="mono"
+                            style={{ color: (r.change || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                            {r.change != null ? fmtPct(r.change) : '—'}
+                          </td>
+                          <td className="mono">{r.shares}</td>
+                          <td className="mono">{r.costBasis ? `$${fmtNum(r.costBasis)}` : '—'}</td>
+                          <td className="mono">{r.mktValue ? `$${r.mktValue.toFixed(2)}` : '—'}</td>
+                          <td>
+                            <span style={{
+                              color: r.gainAbs >= 0 ? 'var(--green)' : 'var(--red)',
+                              fontFamily: 'var(--font-mono)',
+                              fontWeight: 500,
+                            }}>
+                              {r.gainAbs >= 0 ? '+' : ''}${Math.abs(r.gainAbs).toFixed(2)}
+                              <span style={{ fontSize: 11, opacity: 0.8 }}>
+                                {' '}({fmtPct(r.gainPct)})
+                              </span>
+                            </span>
+                          </td>
+                          <td className="mono muted">{r.accountNumber || '—'}</td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <button className="remove-btn"
+                              onClick={() => onSuppressPosition?.(r.ticker)}
+                              title="Hide from portfolio view (does not affect actual holdings)">
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+                        {isOpen && r.isEquity && (
+                          <tr className="port-expanded-row">
+                            <td colSpan={11}>
+                              <div className="port-expanded">
+                                <p className="port-research-hint">
+                                  Research panels load on demand. Same data as Watchlist.
+                                </p>
+                                <FilingPanel ticker={r.ticker} />
+                                <ResearchPanel ticker={r.ticker} />
+                                <InsiderPanel ticker={r.ticker} />
+                                <BacktestPanel ticker={r.ticker} />
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="mono">
-                        {refreshing && !r.isLive ? <span style={{ color: 'var(--text-muted)' }}>…</span> : `$${fmtNum(r.price)}`}
-                      </td>
-                      <td className="mono" style={{ color: r.change >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                        {r.change != null ? fmtPct(r.change) : '—'}
-                      </td>
-                      <td className="mono">{r.pos?.shares ?? '—'}</td>
-                      <td className="mono">{r.pos?.costBasis ? `$${fmtNum(r.pos.costBasis)}` : '—'}</td>
-                      <td className="mono">{r.mktValue ? `$${r.mktValue.toFixed(2)}` : '—'}</td>
-                      <td>
-                        {r.cost > 0 ? (
-                          <span style={{ color: r.gainAbs >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'var(--font-mono)', fontWeight: 500 }}>
-                            {r.gainAbs >= 0 ? '+' : ''}${Math.abs(r.gainAbs).toFixed(2)}
-                            <span style={{ fontSize: 11, opacity: 0.8 }}> ({fmtPct(r.gainPct)})</span>
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td>
-                        {r.noScore ? (
-                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>n/a</span>
-                        ) : (
-                          <div className="mini-bars">
-                            {WEIGHT_KEYS.map(k => (
-                              <ScoreBar key={k} label={k.slice(0, 4)} value={r.scores?.[k] ?? 0} />
-                            ))}
-                          </div>
+                        {isOpen && !r.isEquity && (
+                          <tr className="port-expanded-row">
+                            <td colSpan={11}>
+                              <div className="port-expanded port-expanded--noscore">
+                                <p>{r.assetType} holdings aren't scored. Schwab data only.</p>
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td>
-                        <div className="port-actions">
-                          <button className="edit-btn" onClick={() => openEdit(r.ticker)}
-                            title={r.isLive ? 'Schwab-synced — edits will be overwritten on next sync' : 'Enter position'}
-                            disabled={r.isLive}>
-                            ✎
-                          </button>
-                          <button className="remove-btn" onClick={() => onRemoveFromWatchlist(r.ticker)} title="Remove">✕</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* ── CHARTS TAB ── */}
           {activeTab === 'charts' && (
             <div className="charts-grid">
-
               <div className="chart-card">
-                <div className="chart-title">Sector allocation</div>
-                {sectorData.length === 0 ? (
-                  <p className="chart-empty">Enter position sizes to see allocation.</p>
+                <div className="chart-title">Allocation by asset type</div>
+                {assetTypeData.length === 0 ? (
+                  <p className="chart-empty">No positions yet.</p>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
                     <ResponsiveContainer width={200} height={200}>
                       <PieChart>
-                        <Pie data={sectorData} dataKey="value" nameKey="name"
+                        <Pie data={assetTypeData} dataKey="value" nameKey="name"
                           cx="50%" cy="50%" outerRadius={85} innerRadius={45}>
-                          {sectorData.map((_, i) => (
+                          {assetTypeData.map((_, i) => (
                             <Cell key={i} fill={SECTOR_COLORS[i % SECTOR_COLORS.length]} />
                           ))}
                         </Pie>
                         <Tooltip formatter={v => `$${v.toFixed(2)}`}
-                          contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-accent)', borderRadius: 8, fontSize: 12 }} />
+                          contentStyle={{
+                            background: 'var(--bg-card)', border: '1px solid var(--border-accent)',
+                            borderRadius: 8, fontSize: 12,
+                          }} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {sectorData.map((s, i) => (
+                      {assetTypeData.map((s, i) => (
                         <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                          <div style={{ width: 10, height: 10, borderRadius: 2, flexShrink: 0, background: SECTOR_COLORS[i % SECTOR_COLORS.length] }} />
+                          <div style={{ width: 10, height: 10, borderRadius: 2, flexShrink: 0,
+                            background: SECTOR_COLORS[i % SECTOR_COLORS.length] }} />
                           <span style={{ color: 'var(--text-secondary)' }}>{s.name}</span>
-                          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', marginLeft: 'auto', paddingLeft: 20 }}>{s.pct}%</span>
+                          <span style={{
+                            fontFamily: 'var(--font-mono)', color: 'var(--text-primary)',
+                            marginLeft: 'auto', paddingLeft: 20,
+                          }}>{s.pct}%</span>
                         </div>
                       ))}
                     </div>
@@ -385,14 +404,19 @@ export default function Portfolio({
               <div className="chart-card">
                 <div className="chart-title">Gain / loss by position ($)</div>
                 {glData.length === 0 ? (
-                  <p className="chart-empty">Enter cost basis and shares to see P&amp;L.</p>
+                  <p className="chart-empty">No positions yet.</p>
                 ) : (
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={glData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-                      <XAxis dataKey="ticker" tick={{ fontSize: 11, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={55} tickFormatter={v => `$${v}`} />
+                  <ResponsiveContainer width="100%" height={Math.max(180, glData.length * 22)}>
+                    <BarChart data={glData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}
+                      layout="vertical">
+                      <XAxis type="number" tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+                        axisLine={false} tickLine={false}
+                        tickFormatter={v => `$${v}`} />
+                      <YAxis type="category" dataKey="ticker" width={60}
+                        tick={{ fontSize: 11, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+                        axisLine={false} tickLine={false} />
                       <Tooltip content={<ChartTooltip />} />
-                      <Bar dataKey="gain" name="Gain/Loss" radius={[4, 4, 0, 0]}>
+                      <Bar dataKey="gain" name="Gain/Loss" radius={[0, 4, 4, 0]}>
                         {glData.map((e, i) => (
                           <Cell key={i} fill={e.gain >= 0 ? 'var(--green)' : 'var(--red)'} fillOpacity={0.8} />
                         ))}
@@ -401,93 +425,9 @@ export default function Portfolio({
                   </ResponsiveContainer>
                 )}
               </div>
-
-              <div className="chart-card wide">
-                <div className="chart-title">Composite score — all watchlist stocks</div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={scoreData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-                    <XAxis dataKey="ticker" tick={{ fontSize: 11, fill: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
-                    <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} width={30} />
-                    <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-accent)', borderRadius: 8, fontSize: 12 }} />
-                    <Bar dataKey="Score" radius={[4, 4, 0, 0]}>
-                      {scoreData.map((e, i) => (
-                        <Cell key={i} fill={scoreColor(e.Score)} fillOpacity={0.85} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
             </div>
           )}
-
-          {/* ── SCORES TAB ── */}
-          {activeTab === 'scores' && (
-            <div className="scores-grid">
-              {watchlist.map(stock => (
-                <div key={stock.ticker} className="score-card">
-                  <div className="score-card-header">
-                    <div>
-                      <div className="ticker-sym">{stock.ticker}</div>
-                      <div className="ticker-name">{stock.name}</div>
-                    </div>
-                    <span className="score-chip"
-                      style={{ color: scoreColor(stock.composite ?? 0), background: scoreBg(stock.composite ?? 0), fontSize: 18, padding: '4px 14px' }}>
-                      {stock.composite ?? '—'}
-                    </span>
-                  </div>
-                  <div className="score-card-bars">
-                    {WEIGHT_KEYS.map(k => (
-                      <div key={k} className="sc-row">
-                        <span className="sc-label">{k}</span>
-                        <div className="sc-track">
-                          <div className="sc-fill"
-                            style={{ width: `${stock.scores?.[k] ?? 0}%`, background: scoreColor(stock.scores?.[k] ?? 0) }} />
-                        </div>
-                        <span className="sc-val" style={{ color: scoreColor(stock.scores?.[k] ?? 0) }}>
-                          {stock.scores?.[k] ?? 0}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="score-card-why">{stock.why}</p>
-                  <div className="score-card-flags">
-                    {stock.flags?.map((f, i) => (
-                      <span key={i} className={`flag flag-${f.type}`}>{f.label}</span>
-                    ))}
-                  </div>
-                  <FilingPanel ticker={stock.ticker} />
-                  <ResearchPanel ticker={stock.ticker} />
-                  <InsiderPanel ticker={stock.ticker} />
-                  <BacktestPanel ticker={stock.ticker} />
-                </div>
-              ))}
-            </div>
-          )}
-
         </>
-      )}
-
-      {editTicker && (
-        <div className="modal-backdrop" onClick={() => setEditTicker(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">Position — {editTicker}</h3>
-            <div className="modal-field">
-              <label>Shares owned</label>
-              <input type="number" value={editShares} onChange={e => setEditShares(e.target.value)}
-                placeholder="e.g. 10" min={0} step={0.001} />
-            </div>
-            <div className="modal-field">
-              <label>Avg cost basis per share ($)</label>
-              <input type="number" value={editCost} onChange={e => setEditCost(e.target.value)}
-                placeholder="e.g. 185.50" min={0} step={0.01} />
-            </div>
-            <div className="modal-actions">
-              <button className="modal-cancel" onClick={() => setEditTicker(null)}>Cancel</button>
-              <button className="modal-save" onClick={saveEdit}>Save position</button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   )

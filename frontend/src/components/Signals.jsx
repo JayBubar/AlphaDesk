@@ -74,12 +74,36 @@ const DEFAULT_SETTINGS = {
   daysBeforeReview: 90,
 }
 
-export default function Signals({ watchlist, positions, livePrices }) {
+export default function Signals({ watchlist, positions, livePrices, favorites }) {
   const [settings, setSettings]       = useState({ ...DEFAULT_SETTINGS })
   const [showSettings, setShowSettings] = useState(false)
   const [expanded, setExpanded]       = useState(null)
 
-  const results = evaluateAll(watchlist, positions, livePrices, settings)
+  // Build the universe of tickers Signals operates on. Watchlist items are
+  // user-curated research candidates; Schwab-sourced equity positions are
+  // tickers the user actually owns. Both contribute to Signals if starred.
+  const portfolioWatchEntries = Object.entries(positions || {})
+    .filter(([, p]) => p?.source === 'schwab' && p?.assetType === 'EQUITY')
+    .map(([ticker, p]) => ({
+      ticker,
+      name:  p.name || ticker,
+      scores: {},        // Portfolio holdings don't carry screener-side scores
+      composite: null,
+      source: 'portfolio',
+    }))
+
+  // Merge watchlist + portfolio holdings, dedupe by ticker (watchlist wins
+  // because it carries scores). Then filter to favorites only.
+  const merged = [...watchlist]
+  const wlTickers = new Set(watchlist.map(w => w.ticker))
+  for (const p of portfolioWatchEntries) {
+    if (!wlTickers.has(p.ticker)) merged.push(p)
+  }
+  const starredOnly = favorites && favorites.size > 0
+    ? merged.filter(s => favorites.has(s.ticker))
+    : merged
+
+  const results = evaluateAll(starredOnly, positions, livePrices, settings)
 
   const counts = {
     SELL:        results.filter(r => r.signal === 'SELL').length,
@@ -96,7 +120,14 @@ export default function Signals({ watchlist, positions, livePrices }) {
   return (
     <div className="signals">
 
-      <Movers watchlist={watchlist} />
+      <Movers watchlist={starredOnly} />
+
+      {favorites && favorites.size === 0 && merged.length > 0 && (
+        <div className="signals-hint">
+          No favorites starred yet — Signals is showing everything.
+          Star tickers in Watchlist or Portfolio to curate this list.
+        </div>
+      )}
 
       {/* Summary bar */}
       <div className="signals-summary">
@@ -199,7 +230,7 @@ export default function Signals({ watchlist, positions, livePrices }) {
         <div className="signal-cards">
           {results.map(result => {
             const meta    = result.signal ? SIGNAL_META[result.signal] : null
-            const stock   = watchlist.find(s => s.ticker === result.ticker)
+            const stock   = starredOnly.find(s => s.ticker === result.ticker)
             const pos     = positions[result.ticker]
             const price   = livePrices[result.ticker]?.price ?? stock?.price ?? 0
             const isOpen  = expanded === result.ticker

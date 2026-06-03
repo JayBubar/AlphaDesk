@@ -1,0 +1,19 @@
+.star-btn {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: all 0.12s;
+}
+.star-btn:hover {
+  opacity: 1;
+  color: var(--gold);
+}
+.star-btn--active {
+  opacity: 1;
+  color: var(--gold);
+}

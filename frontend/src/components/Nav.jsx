@@ -32,13 +32,19 @@ export default function Nav({ view, setView, watchlistCount, schwabConnected }) 
           Screener
         </button>
         <button
+          className={`nav-btn ${view === 'watchlist' ? 'active' : ''}`}
+          onClick={() => setView('watchlist')}
+        >
+          Watchlist
+          {watchlistCount > 0 && (
+            <span className="nav-badge">{watchlistCount}</span>
+          )}
+        </button>
+        <button
           className={`nav-btn ${view === 'portfolio' ? 'active' : ''}`}
           onClick={() => setView('portfolio')}
         >
           Portfolio
-          {watchlistCount > 0 && (
-            <span className="nav-badge">{watchlistCount}</span>
-          )}
         </button>
         <button
           className={`nav-btn ${view === 'signals' ? 'active' : ''}`}

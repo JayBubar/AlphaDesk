@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import Screener from './components/Screener.jsx'
+import Watchlist from './components/Watchlist.jsx'
 import Portfolio from './components/Portfolio.jsx'
 import Signals from './components/Signals.jsx'
 import Nav from './components/Nav.jsx'
@@ -8,23 +9,23 @@ import { refreshPrices, getSchwabStatus, getHoldings, syncWatchlist } from './li
 import './App.css'
 
 /**
- * Merge a fresh Schwab holdings payload into the local watchlist + positions.
+ * Merge a fresh Schwab holdings payload into the local positions store.
+ *
+ * Schwab sync no longer touches the watchlist — watchlist is now exclusively
+ * the user's curated research list, populated from the Screener. Schwab
+ * positions flow straight into the Portfolio tab.
  *
  * Rules:
- *  - Schwab-sourced items (source='schwab') are refreshed each sync; if they
- *    no longer appear in Schwab they're removed.
- *  - Purely manual entries (no source flag) are left untouched.
- *  - New Schwab tickers are auto-added to both stores.
- *  - Non-EQUITY assets (ETFs, mutual funds) are marked noScore so Portfolio
- *    renders them without score bars.
+ *  - Schwab-sourced positions (source='schwab') are refreshed each sync;
+ *    if they no longer appear in Schwab they're removed.
+ *  - Legacy manual positions (no source flag) are left in localStorage but
+ *    Portfolio filters them out — they won't render anywhere.
+ *  - Multi-account holdings of the same ticker are summed with weighted
+ *    average cost basis.
  */
-function mergeSchwabHoldings(watchlist, positions, holdings, suppressedSet = new Set()) {
-  if (!holdings?.accounts) return { watchlist, positions }
+function mergeSchwabPositions(positions, holdings, suppressedSet = new Set()) {
+  if (!holdings?.accounts) return positions
 
-  // Flatten all positions across accounts; keep latest if a ticker is held in
-  // multiple accounts (Schwab will return separate rows). We'll sum quantities
-  // since the same ticker held in two accounts should aggregate. Suppressed
-  // tickers (user-removed Schwab holdings) are filtered out up front.
   const bySymbol = new Map()
   for (const acct of holdings.accounts) {
     for (const p of acct.positions || []) {
@@ -39,69 +40,33 @@ function mergeSchwabHoldings(watchlist, positions, holdings, suppressedSet = new
         existing.avgCost = totalQty ? totalCost / totalQty : existing.avgCost
         existing.marketValue += p.marketValue
         existing.gainLoss += p.gainLoss
-        existing.gainLossPct = (existing.marketValue - existing.avgCost * existing.quantity)
-          && (existing.avgCost * existing.quantity)
-            ? (existing.gainLoss / (existing.avgCost * existing.quantity)) * 100
-            : 0
+        existing.gainLossPct = (existing.avgCost * existing.quantity)
+          ? (existing.gainLoss / (existing.avgCost * existing.quantity)) * 100
+          : 0
         existing.accountNumber = 'multiple'
       }
     }
   }
 
   const schwabSymbols = new Set(bySymbol.keys())
-
-  // ── Watchlist merge ────────────────────────────────────────────────────────
-  const wlBySymbol = new Map(watchlist.map(w => [w.ticker, w]))
-
-  // Drop Schwab-sourced entries that are no longer held.
-  for (const [ticker, w] of wlBySymbol.entries()) {
-    if (w.source === 'schwab' && !schwabSymbols.has(ticker)) {
-      wlBySymbol.delete(ticker)
-    }
-  }
-
-  // Add or update Schwab tickers in the watchlist.
-  for (const [ticker, sp] of bySymbol.entries()) {
-    const existing = wlBySymbol.get(ticker)
-    const noScore = sp.assetType !== 'EQUITY'
-    if (existing) {
-      wlBySymbol.set(ticker, {
-        ...existing,
-        name: existing.name || sp.name,
-        assetType: sp.assetType,
-        noScore: existing.noScore ?? noScore,
-      })
-    } else {
-      wlBySymbol.set(ticker, {
-        ticker,
-        name: sp.name,
-        assetType: sp.assetType,
-        source: 'schwab',
-        noScore,
-        addedAt: new Date().toISOString(),
-      })
-    }
-  }
-
-  // ── Positions merge ────────────────────────────────────────────────────────
-  const nextPositions = { ...positions }
+  const next = { ...positions }
 
   // Drop Schwab-sourced positions that are no longer held.
-  for (const [ticker, p] of Object.entries(nextPositions)) {
+  for (const [ticker, p] of Object.entries(next)) {
     if (p.source === 'schwab' && !schwabSymbols.has(ticker)) {
-      delete nextPositions[ticker]
+      delete next[ticker]
     }
   }
 
-  // Add or update Schwab positions. Keep user-added notes/stars/entryDate/entryScore.
+  // Add or update Schwab positions. Preserve any user-added entry notes
+  // that might have come from legacy manual entry.
   for (const [ticker, sp] of bySymbol.entries()) {
-    const existing = nextPositions[ticker] || {}
-    nextPositions[ticker] = {
+    const existing = next[ticker] || {}
+    next[ticker] = {
       ...existing,
       shares: sp.quantity,
       costBasis: sp.avgCost,
       entryDate: existing.entryDate || new Date().toISOString().split('T')[0],
-      entryScore: existing.entryScore || 0,
       source: 'schwab',
       currentPrice: sp.currentPrice,
       marketValue: sp.marketValue,
@@ -113,43 +78,46 @@ function mergeSchwabHoldings(watchlist, positions, holdings, suppressedSet = new
     }
   }
 
-  return {
-    watchlist: Array.from(wlBySymbol.values()),
-    positions: nextPositions,
-  }
+  return next
 }
 
 export default function App() {
   const [view, setView] = useState('screener')
   const [watchlist, setWatchlist] = useState(() => storage.loadWatchlist())
   const [positions, setPositions] = useState(() => storage.loadPositions())
+  const [favorites, setFavorites] = useState(() => storage.loadFavorites())
   const [livePrice, setLivePrice] = useState({})
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefresh, setLastRefresh] = useState(null)
 
-  const [schwabConnected, setSchwabConnected] = useState(null) // null = loading
+  const [schwabConnected, setSchwabConnected] = useState(null)
   const [schwabSyncing, setSchwabSyncing] = useState(false)
   const [schwabError, setSchwabError] = useState(null)
   const [schwabLastSync, setSchwabLastSync] = useState(null)
   const [schwabSuppressed, setSchwabSuppressed] = useState(() => storage.loadSchwabSuppressed())
 
   useEffect(() => { storage.saveSchwabSuppressed(schwabSuppressed) }, [schwabSuppressed])
-
   useEffect(() => { storage.saveWatchlist(watchlist) }, [watchlist])
   useEffect(() => { storage.savePositions(positions) }, [positions])
+  useEffect(() => { storage.saveFavorites(favorites) }, [favorites])
 
-  // Mirror the watchlist to a server-side blob so the nightly cache-warmer
-  // knows which tickers to pre-fetch research + insider for. Debounced 2s
-  // so rapid edits collapse into one POST. Failures are silently dropped.
+  // Mirror the watchlist + portfolio tickers to a server-side blob so the
+  // nightly cron warms research/insider/filings caches for the union.
+  // Debounced 2s; failures swallowed.
   useEffect(() => {
-    const tickers = watchlist.map(w => w.ticker)
+    const portfolioTickers = Object.keys(positions).filter(
+      t => positions[t]?.source === 'schwab' && positions[t]?.assetType === 'EQUITY'
+    )
+    const union = Array.from(new Set([
+      ...watchlist.map(w => w.ticker),
+      ...portfolioTickers,
+    ]))
     const timer = setTimeout(() => {
-      syncWatchlist(tickers).catch(() => {})
+      syncWatchlist(union).catch(() => {})
     }, 2000)
     return () => clearTimeout(timer)
-  }, [watchlist])
+  }, [watchlist, positions])
 
-  // Check Schwab connection status on mount.
   useEffect(() => {
     getSchwabStatus().then(s => setSchwabConnected(s.connected)).catch(() => {
       setSchwabConnected(false)
@@ -162,15 +130,10 @@ export default function App() {
     try {
       const holdings = await getHoldings({ refresh })
       setSchwabLastSync(holdings.cached_at)
-      // Read fresh state via the storage layer to avoid a closure stale-read
-      // (this callback's deps would otherwise need watchlist/positions, which
-      // would re-fire the effect on every merge — infinite loop risk).
-      const currentWl = storage.loadWatchlist()
       const currentPos = storage.loadPositions()
       const suppressedSet = new Set(storage.loadSchwabSuppressed())
-      const merged = mergeSchwabHoldings(currentWl, currentPos, holdings, suppressedSet)
-      setWatchlist(merged.watchlist)
-      setPositions(merged.positions)
+      const merged = mergeSchwabPositions(currentPos, holdings, suppressedSet)
+      setPositions(merged)
     } catch (e) {
       if (e.status === 401) {
         setSchwabConnected(false)
@@ -183,16 +146,25 @@ export default function App() {
     }
   }, [])
 
-  // Auto-sync once when Schwab connection is confirmed.
   useEffect(() => {
     if (schwabConnected) syncSchwab()
   }, [schwabConnected, syncSchwab])
 
+  // Live prices cover BOTH watchlist (research) and Schwab equity positions.
+  // ETFs/MFs get prices straight from Schwab on each sync, so we don't refresh
+  // those separately.
   const refreshAllPrices = useCallback(async () => {
-    if (!watchlist.length) return
+    const portfolioEquityTickers = Object.keys(positions).filter(
+      t => positions[t]?.source === 'schwab' && positions[t]?.assetType === 'EQUITY'
+    )
+    const tickers = Array.from(new Set([
+      ...watchlist.map(s => s.ticker),
+      ...portfolioEquityTickers,
+    ]))
+    if (!tickers.length) return
     setRefreshing(true)
     try {
-      const data = await refreshPrices(watchlist.map(s => s.ticker))
+      const data = await refreshPrices(tickers)
       setLivePrice(data)
       setLastRefresh(new Date())
     } catch (e) {
@@ -200,11 +172,11 @@ export default function App() {
     } finally {
       setRefreshing(false)
     }
-  }, [watchlist])
+  }, [watchlist, positions])
 
   useEffect(() => {
-    if (watchlist.length > 0) refreshAllPrices()
-  }, [watchlist.length, refreshAllPrices])
+    if (watchlist.length > 0 || Object.keys(positions).length > 0) refreshAllPrices()
+  }, [watchlist.length, Object.keys(positions).length, refreshAllPrices])
 
   function addToWatchlist(stock) {
     setWatchlist(prev =>
@@ -215,14 +187,24 @@ export default function App() {
   }
 
   function removeFromWatchlist(ticker) {
-    // If the user is removing a Schwab-sourced ticker, also suppress it so
-    // the next sync doesn't silently re-add it.
-    const existing = watchlist.find(s => s.ticker === ticker)
-    const pos = positions[ticker]
-    if (existing?.source === 'schwab' || pos?.source === 'schwab') {
-      setSchwabSuppressed(prev => prev.includes(ticker) ? prev : [...prev, ticker])
-    }
     setWatchlist(prev => prev.filter(s => s.ticker !== ticker))
+  }
+
+  function toggleFavorite(ticker) {
+    setFavorites(prev =>
+      prev.includes(ticker)
+        ? prev.filter(t => t !== ticker)
+        : [...prev, ticker]
+    )
+  }
+
+  function unsuppressSchwab(ticker) {
+    setSchwabSuppressed(prev => prev.filter(t => t !== ticker))
+    if (schwabConnected) syncSchwab({ refresh: true })
+  }
+
+  function suppressSchwabPosition(ticker) {
+    setSchwabSuppressed(prev => prev.includes(ticker) ? prev : [...prev, ticker])
     setPositions(prev => {
       const next = { ...prev }
       delete next[ticker]
@@ -230,11 +212,7 @@ export default function App() {
     })
   }
 
-  function unsuppressSchwab(ticker) {
-    setSchwabSuppressed(prev => prev.filter(t => t !== ticker))
-    // Trigger a re-sync so the ticker comes back on next merge.
-    if (schwabConnected) syncSchwab({ refresh: true })
-  }
+  const favoritesSet = new Set(favorites)
 
   return (
     <div className="app-shell">
@@ -252,12 +230,21 @@ export default function App() {
             onRemoveFromWatchlist={removeFromWatchlist}
           />
         )}
-        {view === 'portfolio' && (
-          <Portfolio
+        {view === 'watchlist' && (
+          <Watchlist
             watchlist={watchlist}
             onRemoveFromWatchlist={removeFromWatchlist}
+            livePrice={livePrice}
+            refreshAllPrices={refreshAllPrices}
+            refreshing={refreshing}
+            lastRefresh={lastRefresh}
+            favorites={favoritesSet}
+            onToggleFavorite={toggleFavorite}
+          />
+        )}
+        {view === 'portfolio' && (
+          <Portfolio
             positions={positions}
-            setPositions={setPositions}
             livePrice={livePrice}
             refreshAllPrices={refreshAllPrices}
             refreshing={refreshing}
@@ -269,6 +256,9 @@ export default function App() {
             onSchwabSync={() => syncSchwab({ refresh: true })}
             schwabSuppressed={schwabSuppressed}
             onUnsuppressSchwab={unsuppressSchwab}
+            onSuppressPosition={suppressSchwabPosition}
+            favorites={favoritesSet}
+            onToggleFavorite={toggleFavorite}
           />
         )}
         {view === 'signals' && (
@@ -276,6 +266,7 @@ export default function App() {
             watchlist={watchlist}
             positions={positions}
             livePrices={livePrice}
+            favorites={favoritesSet}
           />
         )}
       </main>

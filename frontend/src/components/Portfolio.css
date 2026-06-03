@@ -432,3 +432,58 @@
 .freshness-dot--schwab {
   background: var(--green);
 }
+
+/* Refactored portfolio row layout (Schwab-only) */
+.portfolio-table .th-star,
+.portfolio-table .td-star {
+  width: 32px;
+  padding-left: 8px;
+  padding-right: 0;
+}
+
+.port-row {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.port-row:hover {
+  background: var(--bg-input);
+}
+.port-row.expanded {
+  background: var(--bg-input);
+}
+
+.port-expanded-row {
+  background: var(--bg-input);
+}
+.port-expanded-row td {
+  padding: 0;
+}
+
+.port-expanded {
+  padding: 16px 20px 18px 60px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+.port-expanded--noscore {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 12px;
+}
+
+.port-research-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 4px 0;
+}
+
+.asset-type-badge--equity {
+  background: rgba(96, 165, 250, 0.12);
+  color: var(--blue);
+  border-color: rgba(96, 165, 250, 0.3);
+}
+
+.muted {
+  color: var(--text-muted);
+}
