@@ -1,10 +1,65 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { evaluateAll, SIGNAL_META } from '../lib/signals.js'
+import { getResearch } from '../lib/api.js'
 import { fmtPct, fmtNum, scoreColor, scoreBg } from '../lib/scoring.js'
 import ScoreBar from './ScoreBar.jsx'
 import Movers from './Movers.jsx'
 import './Signals.css'
 import './Movers.css'
+
+const SENTIMENT_LABEL = { bullish: 'Bullish', bearish: 'Bearish', neutral: 'Neutral' }
+const SENTIMENT_COLOR = {
+  bullish: 'var(--green)',
+  bearish: 'var(--red)',
+  neutral: 'var(--text-muted)',
+}
+const CONSENSUS_LABEL = { buy: 'Buy', hold: 'Hold', sell: 'Sell' }
+
+/**
+ * Fetches the cached research card for a watchlist ticker and surfaces the
+ * top catalyst / top risk inline. The endpoint serves from cache so this
+ * doesn't burn Perplexity quota — and the nightly cron keeps the cache warm.
+ * Renders nothing if the ticker has no cached entry yet (avoids a noisy 503
+ * inside the signal card for users without the API key set).
+ */
+function ResearchPreview({ ticker }) {
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    let alive = true
+    getResearch(ticker)
+      .then(r => { if (alive) setData(r) })
+      .catch(() => { /* no cache yet, no key, or transient — stay quiet */ })
+    return () => { alive = false }
+  }, [ticker])
+
+  if (!data) return null
+
+  return (
+    <div className="signal-research">
+      <div className="detail-col-title">Research snapshot</div>
+      <div className="sr-head">
+        <span className="sr-sentiment" style={{ color: SENTIMENT_COLOR[data.sentiment] }}>
+          {SENTIMENT_LABEL[data.sentiment] || data.sentiment}
+        </span>
+        {data.analystConsensus && (
+          <span className="sr-consensus">
+            · Analysts: <strong>{CONSENSUS_LABEL[data.analystConsensus] || data.analystConsensus}</strong>
+          </span>
+        )}
+        {!data.fresh && data.cached_at && (
+          <span className="sr-cached">cached</span>
+        )}
+      </div>
+      {data.summary && <p className="sr-summary">{data.summary}</p>}
+      {data.catalysts?.[0] && (
+        <p className="sr-line"><span className="sr-tag sr-tag--good">+</span>{data.catalysts[0]}</p>
+      )}
+      {data.risks?.[0] && (
+        <p className="sr-line"><span className="sr-tag sr-tag--bad">−</span>{data.risks[0]}</p>
+      )}
+    </div>
+  )
+}
 
 const WEIGHT_KEYS = ['fundamentals', 'momentum', 'sentiment', 'filingTone', 'insider']
 
@@ -286,6 +341,9 @@ export default function Signals({ watchlist, positions, livePrices }) {
                       </div>
 
                     </div>
+
+                    {/* Research snapshot (cached) */}
+                    <ResearchPreview ticker={result.ticker} />
 
                     {/* Why it was added */}
                     {stock?.why && (

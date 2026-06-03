@@ -534,3 +534,29 @@ input[type=range] {
   font-weight: 400;
   margin-left: 6px;
 }
+
+.error-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.data-source-badge {
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+.data-source-badge--good {
+  color: var(--green);
+  background: rgba(62, 207, 142, 0.12);
+}
+.data-source-badge--warn {
+  color: var(--amber);
+  background: rgba(255, 200, 0, 0.12);
+}
+.data-source-badge--mixed,
+.data-source-badge--neutral {
+  color: var(--text-muted);
+  background: var(--bg-input);
+}

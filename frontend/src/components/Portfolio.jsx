@@ -159,20 +159,28 @@ export default function Portfolio({
           <p className="page-subtitle">Watchlist · positions · P&amp;L · analytics</p>
         </div>
         <div className="header-actions">
-          {schwabConnected && (
-            <>
-              {schwabLastSync && (
-                <span className="last-refresh schwab-sync-time">
-                  Schwab synced {relativeTime(schwabLastSync)}
+          {(lastRefresh || schwabLastSync) && (
+            <div className="freshness-stack">
+              {lastRefresh && (
+                <span className="freshness-line">
+                  <span className="freshness-dot" />
+                  Quotes {lastRefresh.toLocaleTimeString()}
                 </span>
               )}
-              <button className="refresh-btn schwab-sync-btn" onClick={onSchwabSync}
-                disabled={schwabSyncing} title="Re-pull positions from Schwab">
-                {schwabSyncing ? 'Syncing…' : 'Sync Schwab'}
-              </button>
-            </>
+              {schwabConnected && schwabLastSync && (
+                <span className="freshness-line freshness-line--schwab">
+                  <span className="freshness-dot freshness-dot--schwab" />
+                  Schwab {relativeTime(schwabLastSync)}
+                </span>
+              )}
+            </div>
           )}
-          {lastRefresh && <span className="last-refresh">Quotes {lastRefresh.toLocaleTimeString()}</span>}
+          {schwabConnected && (
+            <button className="refresh-btn schwab-sync-btn" onClick={onSchwabSync}
+              disabled={schwabSyncing} title="Re-pull positions from Schwab">
+              {schwabSyncing ? 'Syncing…' : 'Sync Schwab'}
+            </button>
+          )}
           <button className="refresh-btn" onClick={refreshAllPrices} disabled={refreshing}>
             {refreshing ? 'Refreshing…' : 'Refresh prices'}
           </button>

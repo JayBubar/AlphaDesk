@@ -402,3 +402,33 @@
   margin-left: 4px;
   opacity: 0.7;
 }
+
+/* Consolidated freshness indicator */
+.freshness-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-right: 6px;
+}
+.freshness-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.freshness-line--schwab {
+  color: var(--green);
+}
+.freshness-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.freshness-dot--schwab {
+  background: var(--green);
+}

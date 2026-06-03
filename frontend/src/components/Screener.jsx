@@ -83,13 +83,16 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
     setFilters(prev => ({ ...prev, [k]: v }))
   }
 
-  const runScreen = useCallback(async () => {
+  const runScreen = useCallback(async (overrides = null) => {
     setLoading(true)
     setError(null)
     setResults(null)
     setShowAll(false)  // collapse back to top-N when re-running
     try {
-      const raw = await screenStocks({ ...filters, profile })
+      // Accept overrides so callers (e.g. sector heatmap clicks) can run with
+      // a freshly-changed filter without waiting for the setState round-trip.
+      const finalParams = { ...filters, ...(overrides || {}), profile }
+      const raw = await screenStocks(finalParams)
       setResults(raw)
       if (raw[0]?.methodologyVersion) setMethodologyVersion(raw[0].methodologyVersion)
       // Snapshot composite scores for the movers card on the Signals tab.
@@ -247,7 +250,10 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
 
       {error && (
         <div className="error-banner">
-          Could not fetch data: {error}. Is the backend running on port 8000?
+          Could not fetch data: {error}
+          {import.meta.env.DEV && (
+            <span className="error-hint"> · check that the backend is running on :8000</span>
+          )}
         </div>
       )}
 
@@ -265,8 +271,9 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
             activeSector={filters.sector}
             onSectorClick={(sec) => {
               setFilter('sector', sec)
-              // Re-run with the new sector filter applied.
-              setTimeout(runScreen, 0)
+              // Pass sec as override so runScreen doesn't see the stale
+              // filters value before setFilter has settled.
+              runScreen({ sector: sec })
             }}
           />
           <div className="results-header">
@@ -275,6 +282,7 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
               <span className="stat"><strong>{results.filter(s => s.composite >= 75).length}</strong> scored 75+</span>
               <span className="stat"><strong>{results.filter(s => watchSet.has(s.ticker)).length}</strong> on watchlist</span>
               <span className="stat profile-badge">Profile: <strong>{profileMeta.short}</strong></span>
+              <DataSourceBadge results={results} />
             </div>
           </div>
 
@@ -390,6 +398,34 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
         </section>
       )}
     </div>
+  )
+}
+
+/**
+ * Surfaces the dataSource field that screen.mjs already sets on every result
+ * but the UI was hiding. Tells the user at a glance whether they're looking
+ * at Schwab real-time data or the FMP fallback (delayed).
+ */
+function DataSourceBadge({ results }) {
+  if (!results?.length) return null
+  const sources = new Set(results.map(r => r.dataSource).filter(Boolean))
+  if (!sources.size) return null
+
+  let label, tier
+  if (sources.size > 1) {
+    label = 'Mixed sources'
+    tier  = 'mixed'
+  } else {
+    const src = [...sources][0]
+    if (src === 'schwab+fmp') { label = 'Schwab live'; tier = 'good' }
+    else if (src === 'fmp')   { label = 'FMP delayed'; tier = 'warn' }
+    else                       { label = src;          tier = 'neutral' }
+  }
+  return (
+    <span className={`stat data-source-badge data-source-badge--${tier}`}
+      title="Data source: Schwab quotes are real-time, FMP is delayed ~15 min">
+      {label}
+    </span>
   )
 }
 
