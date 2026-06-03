@@ -163,20 +163,24 @@ async function loadUniverse() {
 }
 
 // Default cap on universe size to stay inside Netlify's 10-second function
-// timeout. Empirically a single Schwab /quotes call with 250+ symbols can
-// take >6 seconds — so we keep the default scan small and parallelize the
-// Schwab call into smaller batches.
+// timeout. Empirically Schwab /quotes calls with 100+ symbols can stretch
+// past 4s on this account, so we keep universes small and the Schwab batch
+// size tiny (50) to maximize parallelism within Lambda's network stack.
 const UNIVERSE_CAPS = {
-  small:   100,   // tight scan, fastest
-  medium:  200,   // default
-  large:   400,   // opt-in for broader coverage
-  full:   2000,  // opt-in to S&P 900+; risk of timeout
+  small:   100,
+  medium:  200,
+  large:   400,
+  full:   2000,
 };
 
-// Schwab /quotes officially supports 500 symbols/call but our deploy is
-// timing out at ~6s on calls of ~250 symbols. Smaller batches in parallel
-// give us more reliable behavior at the cost of more concurrent connections.
-const SCHWAB_BATCH_SIZE = 100;
+// Schwab /quotes officially supports 500 symbols/call but in practice the
+// response time scales sharply past ~50 symbols on this account. Smaller
+// batches let us run more parallel requests with predictable latencies.
+const SCHWAB_BATCH_SIZE = 50;
+
+// Hard ceiling on total handler work. Netlify's function timeout is 10s; we
+// reserve 1.5s of headroom for response serialization and edge processing.
+const HANDLER_DEADLINE_MS = 8500;
 const FMP_BATCH_SIZE = 100;
 
 function chunk(arr, size) {
@@ -534,9 +538,9 @@ function buildEarningsFlag(dateStr) {
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
-export default async (req) => {
-  try {
-    const sp = new URL(req.url).searchParams;
+
+async function runHandler(req) {
+  const sp = new URL(req.url).searchParams;
 
     const filterSector = sp.get('sector')  || '';
     const filterCap    = sp.get('cap')     || '';
@@ -812,8 +816,37 @@ export default async (req) => {
         why:                `${s.surface.name} (${s.surface.sector}).`,
       };
     }));
+}
 
-  } catch (err) {
-    return Response.json({ error: err.message, stack: err.stack }, { status: 500 });
+// Wrap runHandler in a deadline + top-level catch so a hung upstream can't
+// turn into Netlify's generic HTML 502. We ALWAYS return JSON, even if
+// degraded. The deadline is set just under Netlify's 10s function timeout.
+export default async (req) => {
+  let timeoutHandle;
+  const deadline = new Promise(resolve => {
+    timeoutHandle = setTimeout(() => {
+      resolve(Response.json({
+        error: 'screen deadline exceeded',
+        detail: `Upstream data sources did not respond within ${HANDLER_DEADLINE_MS}ms. ` +
+                'Try a smaller universeSize or narrower filters.',
+      }, { status: 504 }));
+    }, HANDLER_DEADLINE_MS);
+  });
+
+  const work = (async () => {
+    try {
+      return await runHandler(req);
+    } catch (err) {
+      return Response.json(
+        { error: err?.message || 'internal error', stack: err?.stack },
+        { status: 500 },
+      );
+    }
+  })();
+
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timeoutHandle);
   }
 };
