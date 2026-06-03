@@ -4,7 +4,7 @@ import Portfolio from './components/Portfolio.jsx'
 import Signals from './components/Signals.jsx'
 import Nav from './components/Nav.jsx'
 import { storage } from './lib/storage.js'
-import { refreshPrices, getSchwabStatus, getHoldings } from './lib/api.js'
+import { refreshPrices, getSchwabStatus, getHoldings, syncWatchlist } from './lib/api.js'
 import './App.css'
 
 /**
@@ -132,6 +132,17 @@ export default function App() {
 
   useEffect(() => { storage.saveWatchlist(watchlist) }, [watchlist])
   useEffect(() => { storage.savePositions(positions) }, [positions])
+
+  // Mirror the watchlist to a server-side blob so the nightly cache-warmer
+  // knows which tickers to pre-fetch research + insider for. Debounced 2s
+  // so rapid edits collapse into one POST. Failures are silently dropped.
+  useEffect(() => {
+    const tickers = watchlist.map(w => w.ticker)
+    const timer = setTimeout(() => {
+      syncWatchlist(tickers).catch(() => {})
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [watchlist])
 
   // Check Schwab connection status on mount.
   useEffect(() => {

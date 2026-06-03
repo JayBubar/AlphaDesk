@@ -504,3 +504,33 @@ input[type=range] {
   color: var(--gold);
 }
 .ui-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.show-more-row {
+  display: flex;
+  justify-content: center;
+  padding: 14px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+}
+.show-more-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-body);
+}
+.show-more-btn:hover {
+  border-color: var(--gold-border);
+  color: var(--gold);
+}
+.show-more-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 6px;
+}

@@ -79,6 +79,16 @@ export async function getInsider(ticker, { refresh = false } = {}) {
   return res.json()
 }
 
+export async function syncWatchlist(tickers) {
+  // Fire-and-forget mirror to the server-side blob the nightly cron reads.
+  // Errors are swallowed at the call site — the local watchlist is the truth.
+  return fetch(`${BASE}/sync-watchlist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tickers }),
+  })
+}
+
 export async function getHoldings({ refresh = false } = {}) {
   const url = `${BASE}/holdings${refresh ? '?refresh=1' : ''}`
   const res = await fetch(url)

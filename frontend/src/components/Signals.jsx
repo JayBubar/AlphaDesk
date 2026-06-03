@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { evaluateAll, SIGNAL_META } from '../lib/signals.js'
 import { fmtPct, fmtNum, scoreColor, scoreBg } from '../lib/scoring.js'
 import ScoreBar from './ScoreBar.jsx'
+import Movers from './Movers.jsx'
 import './Signals.css'
+import './Movers.css'
 
 const WEIGHT_KEYS = ['fundamentals', 'momentum', 'sentiment', 'filingTone', 'insider']
 
@@ -38,6 +40,8 @@ export default function Signals({ watchlist, positions, livePrices }) {
 
   return (
     <div className="signals">
+
+      <Movers watchlist={watchlist} />
 
       {/* Summary bar */}
       <div className="signals-summary">

@@ -54,6 +54,9 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
   const [methodologyVersion, setMethodologyVersion] = useState(null)
   const [universeInfo, setUniverseInfo] = useState(null)
   const [universeRefreshing, setUniverseRefreshing] = useState(false)
+  const [showAll, setShowAll] = useState(false)
+
+  const TOP_N_DEFAULT = 50
 
   useEffect(() => { storage.saveProfile(profile) }, [profile])
 
@@ -84,10 +87,19 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
     setLoading(true)
     setError(null)
     setResults(null)
+    setShowAll(false)  // collapse back to top-N when re-running
     try {
       const raw = await screenStocks({ ...filters, profile })
       setResults(raw)
       if (raw[0]?.methodologyVersion) setMethodologyVersion(raw[0].methodologyVersion)
+      // Snapshot composite scores for the movers card on the Signals tab.
+      for (const stock of raw) {
+        storage.appendScoreSnapshot(stock.ticker, {
+          composite: stock.composite,
+          profile: stock.profile,
+          methodologyVersion: stock.methodologyVersion,
+        })
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -285,7 +297,7 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
                   </tr>
                 </thead>
                 <tbody>
-                  {sorted.map(stock => (
+                  {(showAll ? sorted : sorted.slice(0, TOP_N_DEFAULT)).map(stock => (
                     <Fragment key={stock.ticker}>
                       <tr
                         className={`result-row ${expandedRow === stock.ticker ? 'expanded' : ''}`}
@@ -356,6 +368,23 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
                   ))}
                 </tbody>
               </table>
+              {!showAll && sorted.length > TOP_N_DEFAULT && (
+                <div className="show-more-row">
+                  <button className="show-more-btn" onClick={() => setShowAll(true)}>
+                    Show all {sorted.length} results
+                    <span className="show-more-hint">
+                      · currently showing top {TOP_N_DEFAULT} by {sortKey === 'composite' ? 'composite score' : sortKey}
+                    </span>
+                  </button>
+                </div>
+              )}
+              {showAll && sorted.length > TOP_N_DEFAULT && (
+                <div className="show-more-row">
+                  <button className="show-more-btn" onClick={() => setShowAll(false)}>
+                    Collapse to top {TOP_N_DEFAULT}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </section>
