@@ -661,6 +661,22 @@ async function runHandler(req) {
             : Response.json([]);
         }
 
+        // Cap downstream work at 100 tickers. The cache lookup stage does
+        // 3 Netlify Blobs reads per ticker — at >150 tickers we exhaust
+        // either the per-invocation Blobs budget or Lambda's event loop
+        // and the function dies hard before our handler deadline can fire.
+        // Tickers ranked by market cap (Schwab f.marketCap) so the top
+        // N by size survive the cull.
+        const MAX_SURVIVORS = 100;
+        if (presurvivors.length > MAX_SURVIVORS) {
+          presurvivors.sort((a, b) =>
+            (schwabData[b]?.fundamental?.marketCap || 0) -
+            (schwabData[a]?.fundamental?.marketCap || 0)
+          );
+          presurvivors.length = MAX_SURVIVORS;
+          mark('presurvivors-capped', { count: MAX_SURVIVORS });
+        }
+
         // Batch FMP /profile and /quote in chunks of 100 (per-call URL limit).
         const fmpChunks = chunk(presurvivors, FMP_BATCH_SIZE);
         mark('fmp-start', { chunks: fmpChunks.length });
