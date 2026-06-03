@@ -111,12 +111,17 @@ async function buildUniverse() {
   catch (e) { errors.push(`sp400: ${e.message}`); }
 
   // Merge + dedupe by symbol; S&P 500 entries win when both lists have a name.
+  // Tag each entry with its index so screen.mjs can prioritize S&P 500 when
+  // capping the universe to stay inside the function timeout.
   const map = new Map();
-  for (const e of sp400) map.set(e.symbol, e);
-  for (const e of sp500) map.set(e.symbol, e);
+  for (const e of sp400) map.set(e.symbol, { ...e, index: 'sp400' });
+  for (const e of sp500) map.set(e.symbol, { ...e, index: 'sp500' });
 
-  const tickers = Array.from(map.values()).sort((a, b) =>
-    a.symbol.localeCompare(b.symbol));
+  // Sort S&P 500 first, then S&P 400, alphabetical within each group.
+  const tickers = Array.from(map.values()).sort((a, b) => {
+    if (a.index !== b.index) return a.index === 'sp500' ? -1 : 1;
+    return a.symbol.localeCompare(b.symbol);
+  });
 
   // If Wikipedia returns nothing usable, fall back so the app keeps working.
   if (tickers.length < 100) {

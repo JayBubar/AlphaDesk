@@ -162,6 +162,16 @@ async function loadUniverse() {
   return FALLBACK_UNIVERSE;
 }
 
+// Default cap on universe size to stay inside Netlify's 10-second function
+// timeout. The S&P 900 universe (~900 names) blows it; ~500 is safe with the
+// current Schwab + FMP enrichment pipeline. Caller can request the full set
+// via ?universeSize=full or restrict further with ?universeSize=small.
+const UNIVERSE_CAPS = {
+  small:  250,   // tight scan, fastest
+  medium: 500,   // default — full S&P 500 equivalent
+  full:   2000,  // opt-in to S&P 900+; risk of timeout
+};
+
 // Schwab MarketData v1 /quotes caps at ~500 symbols per call. Batch defensively.
 const SCHWAB_BATCH_SIZE = 500;
 const FMP_BATCH_SIZE = 100;
@@ -436,11 +446,22 @@ function fmpOnlyToMetrics(profile, quote) {
 // ── FMP fetch helpers ─────────────────────────────────────────────────────────
 const FMP_BASE = 'https://financialmodelingprep.com/stable';
 
+// 6s per fetch — well inside Netlify's 10s function timeout. A slow FMP call
+// shouldn't be allowed to consume the whole budget and starve the rest.
+const FETCH_TIMEOUT_MS = 6000;
+
+function fetchWithTimeout(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...opts, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 async function fmpBatch(path, symbols, apiKey) {
   if (!apiKey || !symbols.length) return {};
   try {
     const url = `${FMP_BASE}/${path}?symbol=${encodeURIComponent(symbols.join(','))}&apikey=${apiKey}`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return {};
     const data = await res.json();
     const map = {};
@@ -467,7 +488,7 @@ async function fetchEarningsMap(apiKey) {
     const from = yyyymmdd(new Date());
     const to   = yyyymmdd(new Date(Date.now() + EARNINGS_WINDOW_DAYS * 86400_000));
     const url = `${FMP_BASE}/earnings-calendar?from=${from}&to=${to}&apikey=${apiKey}`;
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) return {};
     const data = await res.json();
     const map = {};
@@ -506,16 +527,25 @@ export default async (req) => {
     const betaMax      = parseFloat(sp.get('betaMax')  || '5');
     const peMax        = parseFloat(sp.get('peMax')    || '100');
     const profileName  = sp.get('profile') || 'growth_mid';
+    const universeSize = sp.get('universeSize') || 'medium';
+    const universeCap  = UNIVERSE_CAPS[universeSize] ?? UNIVERSE_CAPS.medium;
 
     const fmpKey = process.env.FMP_API_KEY || '';
     const token  = await getSchwabToken();
 
     // Load dynamic universe ({symbol, sector, name}). Sector lives in the
     // universe metadata so we can apply the sector filter BEFORE any API
-    // calls — huge win at 900-ticker scale.
+    // calls — huge win at scale.
     let universeEntries = await loadUniverse();
     if (filterSector) {
       universeEntries = universeEntries.filter(u => u.sector === filterSector);
+    }
+    // Cap universe size to stay inside Netlify's 10s timeout. The blob is
+    // already sorted alphabetically so the cap is stable; for "small" /
+    // "medium" we're effectively scanning A-M ish, which biases by ticker
+    // alphabet — acceptable for now since the alternative is timing out.
+    if (universeEntries.length > universeCap) {
+      universeEntries = universeEntries.slice(0, universeCap);
     }
     if (!universeEntries.length) return Response.json([]);
 
@@ -534,7 +564,7 @@ export default async (req) => {
             symbols: batch.join(','),
             fields:  'quote,fundamental,reference',
           });
-          const res = await fetch(
+          const res = await fetchWithTimeout(
             `https://api.schwabapi.com/marketdata/v1/quotes?${params}`,
             { headers: { Authorization: `Bearer ${token}` } },
           );

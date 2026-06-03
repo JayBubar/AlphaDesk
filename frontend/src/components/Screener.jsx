@@ -43,6 +43,7 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
     sector: '', cap: 'md',
     peMax: 40, priceMin: 10, priceMax: 500,
     volMin: 500, betaMax: 1.5,
+    universeSize: 'medium',  // small (250) | medium (500) | full (~900, risk of timeout)
   })
   const [profile, setProfile] = useState(() => storage.loadProfile() || DEFAULT_PROFILE)
   const [results, setResults] = useState(null)
@@ -198,6 +199,16 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
               <label>Min vol (K/day)</label>
               <input type="number" value={filters.volMin} min={0} step={100}
                 onChange={e => setFilter('volMin', +e.target.value)} />
+            </div>
+            <div className="filter-field">
+              <label>Universe</label>
+              <select value={filters.universeSize}
+                onChange={e => setFilter('universeSize', e.target.value)}
+                title="Larger universe = broader scan but risk of timeout">
+                <option value="small">Small (~250)</option>
+                <option value="medium">Medium (~500)</option>
+                <option value="full">Full (~900)</option>
+              </select>
             </div>
             <div className="filter-field">
               <label>Beta max</label>
