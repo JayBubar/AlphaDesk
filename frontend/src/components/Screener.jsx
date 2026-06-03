@@ -205,9 +205,10 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
               <select value={filters.universeSize}
                 onChange={e => setFilter('universeSize', e.target.value)}
                 title="Larger universe = broader scan but risk of timeout">
-                <option value="small">Small (~250)</option>
-                <option value="medium">Medium (~500)</option>
-                <option value="full">Full (~900)</option>
+                <option value="small">Small (~100)</option>
+                <option value="medium">Medium (~200)</option>
+                <option value="large">Large (~400)</option>
+                <option value="full">Full (~900, may time out)</option>
               </select>
             </div>
             <div className="filter-field">

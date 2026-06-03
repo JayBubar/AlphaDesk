@@ -163,17 +163,20 @@ async function loadUniverse() {
 }
 
 // Default cap on universe size to stay inside Netlify's 10-second function
-// timeout. The S&P 900 universe (~900 names) blows it; ~500 is safe with the
-// current Schwab + FMP enrichment pipeline. Caller can request the full set
-// via ?universeSize=full or restrict further with ?universeSize=small.
+// timeout. Empirically a single Schwab /quotes call with 250+ symbols can
+// take >6 seconds — so we keep the default scan small and parallelize the
+// Schwab call into smaller batches.
 const UNIVERSE_CAPS = {
-  small:  250,   // tight scan, fastest
-  medium: 500,   // default — full S&P 500 equivalent
+  small:   100,   // tight scan, fastest
+  medium:  200,   // default
+  large:   400,   // opt-in for broader coverage
   full:   2000,  // opt-in to S&P 900+; risk of timeout
 };
 
-// Schwab MarketData v1 /quotes caps at ~500 symbols per call. Batch defensively.
-const SCHWAB_BATCH_SIZE = 500;
+// Schwab /quotes officially supports 500 symbols/call but our deploy is
+// timing out at ~6s on calls of ~250 symbols. Smaller batches in parallel
+// give us more reliable behavior at the cost of more concurrent connections.
+const SCHWAB_BATCH_SIZE = 100;
 const FMP_BATCH_SIZE = 100;
 
 function chunk(arr, size) {
@@ -446,15 +449,31 @@ function fmpOnlyToMetrics(profile, quote) {
 // ── FMP fetch helpers ─────────────────────────────────────────────────────────
 const FMP_BASE = 'https://financialmodelingprep.com/stable';
 
-// 6s per fetch — well inside Netlify's 10s function timeout. A slow FMP call
-// shouldn't be allowed to consume the whole budget and starve the rest.
-const FETCH_TIMEOUT_MS = 6000;
+// 4s per fetch — tight enough that 2 sequential fetches stay well inside
+// Netlify's 10s function timeout, leaves margin for the scoring pass.
+const FETCH_TIMEOUT_MS = 4000;
 
-function fetchWithTimeout(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
+// Wraps fetch with an AbortController timeout and swallows AbortError into
+// a normal { ok: false } shape so callers don't have to wrap every call in
+// try/catch just to handle timeouts.
+async function fetchWithTimeout(url, opts = {}, ms = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
-  return fetch(url, { ...opts, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
+  try {
+    const res = await fetch(url, { ...opts, signal: controller.signal });
+    return res;
+  } catch (err) {
+    // Return a fake-ok=false response so callers can branch normally.
+    return {
+      ok: false,
+      status: 0,
+      statusText: err?.name === 'AbortError' ? 'timeout' : (err?.message || 'fetch failed'),
+      json: async () => ({}),
+      text: async () => '',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function fmpBatch(path, symbols, apiKey) {
@@ -557,19 +576,27 @@ export default async (req) => {
 
     // ── Path A: Schwab + FMP ────────────────────────────────────────────────
     if (token) {
-      // Batch Schwab into chunks of 500 (its quotes endpoint cap).
+      // Batch Schwab into smaller chunks (100/call) and run in parallel —
+      // single large batches were timing out at ~6s on this account.
       const schwabBatches = await Promise.all(
         chunk(universeSymbols, SCHWAB_BATCH_SIZE).map(async batch => {
-          const params = new URLSearchParams({
-            symbols: batch.join(','),
-            fields:  'quote,fundamental,reference',
-          });
-          const res = await fetchWithTimeout(
-            `https://api.schwabapi.com/marketdata/v1/quotes?${params}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-          );
-          if (!res.ok) return null;  // null marks a failed batch
-          return res.json();
+          try {
+            const params = new URLSearchParams({
+              symbols: batch.join(','),
+              fields:  'quote,fundamental,reference',
+            });
+            const res = await fetchWithTimeout(
+              `https://api.schwabapi.com/marketdata/v1/quotes?${params}`,
+              { headers: { Authorization: `Bearer ${token}` } },
+            );
+            if (!res.ok) return null;
+            return await res.json();
+          } catch (err) {
+            // One bad batch shouldn't kill the request — return null and let
+            // the rest of the batches contribute what they can.
+            console.warn('[screen] schwab batch failed:', err?.message);
+            return null;
+          }
         }),
       );
 
