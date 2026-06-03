@@ -585,9 +585,12 @@ async function runHandler(req) {
       const schwabBatches = await Promise.all(
         chunk(universeSymbols, SCHWAB_BATCH_SIZE).map(async batch => {
           try {
+            // Dropped "reference" from fields — description blobs add ~30%
+            // payload bloat per ticker and we have the name via the
+            // universe metadata. Cuts parse time and Lambda memory churn.
             const params = new URLSearchParams({
               symbols: batch.join(','),
-              fields:  'quote,fundamental,reference',
+              fields:  'quote,fundamental',
             });
             const res = await fetchWithTimeout(
               `https://api.schwabapi.com/marketdata/v1/quotes?${params}`,
@@ -651,13 +654,19 @@ async function runHandler(req) {
         const survivors = presurvivors;
         if (!survivors.length) return Response.json([]);
 
+        // Use the universe metadata as the name + sector fallback so we don't
+        // need Schwab's heavy "reference" payload.
+        const universeMeta = Object.fromEntries(
+          universeEntries.map(u => [u.symbol, u]),
+        );
+
         const scoringInput = survivors.map(sym => {
           const entry = schwabData[sym];
           const q  = entry?.quote       || {};
           const f  = entry?.fundamental || {};
-          const r  = entry?.reference   || {};
           const p  = profileMap[sym]    || {};
           const fq = fmpQuoteMap[sym]   || {};
+          const meta = universeMeta[sym] || {};
 
           const cp   = safe(q.lastPrice, 0);
           const mcap = safe(f.marketCap, 0);
@@ -668,8 +677,8 @@ async function runHandler(req) {
             ticker:  sym,
             metrics: schwabFmpToMetrics(entry, p, fq),
             surface: {
-              name:      safe(p.companyName ?? r.description, sym),
-              sector:    safe(p.sector,   ''),
+              name:      safe(p.companyName ?? meta.name, sym),
+              sector:    safe(p.sector ?? meta.sector, ''),
               industry:  safe(p.industry, ''),
               price:     Math.round(cp * 100) / 100,
               change:    safe(q.netPercentChange),
