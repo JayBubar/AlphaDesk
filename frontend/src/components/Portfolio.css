@@ -320,3 +320,85 @@
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+/* Schwab origin + suppression UI */
+.schwab-origin-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.origin-summary strong {
+  color: var(--green);
+  font-family: var(--font-mono);
+}
+.origin-suppressed-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+.origin-suppressed-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.schwab-suppressed-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.suppressed-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.suppressed-hint {
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+.suppressed-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.suppressed-chip {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.suppressed-chip:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.suppressed-chip-x {
+  margin-left: 4px;
+  opacity: 0.7;
+}

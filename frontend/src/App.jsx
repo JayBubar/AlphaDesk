@@ -18,15 +18,17 @@ import './App.css'
  *  - Non-EQUITY assets (ETFs, mutual funds) are marked noScore so Portfolio
  *    renders them without score bars.
  */
-function mergeSchwabHoldings(watchlist, positions, holdings) {
+function mergeSchwabHoldings(watchlist, positions, holdings, suppressedSet = new Set()) {
   if (!holdings?.accounts) return { watchlist, positions }
 
   // Flatten all positions across accounts; keep latest if a ticker is held in
   // multiple accounts (Schwab will return separate rows). We'll sum quantities
-  // since the same ticker held in two accounts should aggregate.
+  // since the same ticker held in two accounts should aggregate. Suppressed
+  // tickers (user-removed Schwab holdings) are filtered out up front.
   const bySymbol = new Map()
   for (const acct of holdings.accounts) {
     for (const p of acct.positions || []) {
+      if (suppressedSet.has(p.ticker)) continue
       const existing = bySymbol.get(p.ticker)
       if (!existing) {
         bySymbol.set(p.ticker, { ...p, accountNumber: acct.accountNumber })
@@ -129,6 +131,9 @@ export default function App() {
   const [schwabSyncing, setSchwabSyncing] = useState(false)
   const [schwabError, setSchwabError] = useState(null)
   const [schwabLastSync, setSchwabLastSync] = useState(null)
+  const [schwabSuppressed, setSchwabSuppressed] = useState(() => storage.loadSchwabSuppressed())
+
+  useEffect(() => { storage.saveSchwabSuppressed(schwabSuppressed) }, [schwabSuppressed])
 
   useEffect(() => { storage.saveWatchlist(watchlist) }, [watchlist])
   useEffect(() => { storage.savePositions(positions) }, [positions])
@@ -162,7 +167,8 @@ export default function App() {
       // would re-fire the effect on every merge — infinite loop risk).
       const currentWl = storage.loadWatchlist()
       const currentPos = storage.loadPositions()
-      const merged = mergeSchwabHoldings(currentWl, currentPos, holdings)
+      const suppressedSet = new Set(storage.loadSchwabSuppressed())
+      const merged = mergeSchwabHoldings(currentWl, currentPos, holdings, suppressedSet)
       setWatchlist(merged.watchlist)
       setPositions(merged.positions)
     } catch (e) {
@@ -209,14 +215,25 @@ export default function App() {
   }
 
   function removeFromWatchlist(ticker) {
+    // If the user is removing a Schwab-sourced ticker, also suppress it so
+    // the next sync doesn't silently re-add it.
+    const existing = watchlist.find(s => s.ticker === ticker)
+    const pos = positions[ticker]
+    if (existing?.source === 'schwab' || pos?.source === 'schwab') {
+      setSchwabSuppressed(prev => prev.includes(ticker) ? prev : [...prev, ticker])
+    }
     setWatchlist(prev => prev.filter(s => s.ticker !== ticker))
-    // If user explicitly removed, also drop the linked position to avoid
-    // orphaning. They can always re-add manually or via Schwab sync.
     setPositions(prev => {
       const next = { ...prev }
       delete next[ticker]
       return next
     })
+  }
+
+  function unsuppressSchwab(ticker) {
+    setSchwabSuppressed(prev => prev.filter(t => t !== ticker))
+    // Trigger a re-sync so the ticker comes back on next merge.
+    if (schwabConnected) syncSchwab({ refresh: true })
   }
 
   return (
@@ -250,6 +267,8 @@ export default function App() {
             schwabError={schwabError}
             schwabLastSync={schwabLastSync}
             onSchwabSync={() => syncSchwab({ refresh: true })}
+            schwabSuppressed={schwabSuppressed}
+            onUnsuppressSchwab={unsuppressSchwab}
           />
         )}
         {view === 'signals' && (

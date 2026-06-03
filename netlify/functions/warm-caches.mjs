@@ -23,6 +23,10 @@ import { getStore } from '@netlify/blobs';
 const PERPLEXITY_PAUSE_MS = 500;
 const RESEARCH_TTL_MS = 24 * 60 * 60 * 1000;
 const INSIDER_TTL_MS  = 7 * 24 * 60 * 60 * 1000;
+// 10-Ks are annual filings. Re-pulling weekly is the right cadence: catches
+// new fiscal-year drops without wasting EDGAR calls.
+const FILING_TTL_MS   = 7 * 24 * 60 * 60 * 1000;
+const EDGAR_PAUSE_MS  = 150;  // SEC rate limit is 10/sec, we run 1 ticker at a time
 
 function siteBase() {
   // URL/SITE_URL/DEPLOY_URL are all set by Netlify; pick the first one available.
@@ -75,6 +79,23 @@ async function warmInsider(ticker, base) {
   return 'warmed';
 }
 
+async function warmFiling(ticker, base) {
+  if (await freshInStore('filing-scores', ticker, FILING_TTL_MS)) {
+    return 'skip-fresh';
+  }
+  // Same shape as insider: filings.py doesn't write Blobs directly.
+  const fetchRes = await fetch(`${base}/api/filings/${encodeURIComponent(ticker)}`);
+  if (!fetchRes.ok) throw new Error(`filings ${fetchRes.status}`);
+  const payload = await fetchRes.json();
+  const cacheRes = await fetch(`${base}/api/cache-filing`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticker, payload }),
+  });
+  if (!cacheRes.ok) throw new Error(`cache-filing ${cacheRes.status}`);
+  return 'warmed';
+}
+
 export default async () => {
   const base = siteBase();
   const tickers = await loadWatchlistTickers();
@@ -84,6 +105,7 @@ export default async () => {
     ticker_count: tickers.length,
     research: { warmed: 0, skipped: 0, failed: 0 },
     insider:  { warmed: 0, skipped: 0, failed: 0 },
+    filings:  { warmed: 0, skipped: 0, failed: 0 },
     failures: [],
   };
 
@@ -97,10 +119,9 @@ export default async () => {
       summary.research.failed++;
       summary.failures.push({ ticker, layer: 'research', error: e.message });
     }
-    // Polite pause before next Perplexity call.
     await new Promise(r => setTimeout(r, PERPLEXITY_PAUSE_MS));
 
-    // Insider
+    // Insider (EDGAR — uses Python rate-limiter internally)
     try {
       const r = await warmInsider(ticker, base);
       if (r === 'warmed') summary.insider.warmed++;
@@ -109,6 +130,18 @@ export default async () => {
       summary.insider.failed++;
       summary.failures.push({ ticker, layer: 'insider', error: e.message });
     }
+    await new Promise(r => setTimeout(r, EDGAR_PAUSE_MS));
+
+    // Filings (EDGAR — same rate-limiter)
+    try {
+      const r = await warmFiling(ticker, base);
+      if (r === 'warmed') summary.filings.warmed++;
+      else summary.filings.skipped++;
+    } catch (e) {
+      summary.filings.failed++;
+      summary.failures.push({ ticker, layer: 'filings', error: e.message });
+    }
+    await new Promise(r => setTimeout(r, EDGAR_PAUSE_MS));
   }
 
   summary.finished_at = new Date().toISOString();

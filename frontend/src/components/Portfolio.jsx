@@ -62,11 +62,18 @@ export default function Portfolio({
   schwabError,
   schwabLastSync,
   onSchwabSync,
+  schwabSuppressed = [],
+  onUnsuppressSchwab,
 }) {
   const [editTicker, setEditTicker]   = useState(null)
   const [editShares, setEditShares]   = useState('')
   const [editCost, setEditCost]       = useState('')
   const [activeTab, setActiveTab]     = useState('positions')
+  const [showSuppressed, setShowSuppressed] = useState(false)
+
+  // Counts for the "12 watchlist · 3 from Schwab" origin breakdown.
+  const schwabCount = watchlist.filter(s => s.source === 'schwab').length
+  const manualCount = watchlist.length - schwabCount
 
   function openEdit(ticker) {
     const p = positions[ticker] || {}
@@ -174,6 +181,40 @@ export default function Portfolio({
 
       {schwabError && (
         <div className="schwab-error-banner">{schwabError}</div>
+      )}
+
+      {schwabConnected && (schwabCount > 0 || schwabSuppressed.length > 0) && (
+        <div className="schwab-origin-bar">
+          <span className="origin-summary">
+            {watchlist.length} watchlist
+            {schwabCount > 0 && <> · <strong>{schwabCount} from Schwab</strong></>}
+            {manualCount > 0 && schwabCount > 0 && <> · {manualCount} manual</>}
+          </span>
+          {schwabSuppressed.length > 0 && (
+            <button className="origin-suppressed-btn"
+              onClick={() => setShowSuppressed(s => !s)}>
+              {schwabSuppressed.length} excluded from sync {showSuppressed ? '▲' : '▼'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {showSuppressed && schwabSuppressed.length > 0 && (
+        <div className="schwab-suppressed-panel">
+          <div className="suppressed-title">
+            Tickers excluded from Schwab sync
+            <span className="suppressed-hint">click to re-include and trigger sync</span>
+          </div>
+          <div className="suppressed-chips">
+            {schwabSuppressed.map(t => (
+              <button key={t} className="suppressed-chip"
+                onClick={() => onUnsuppressSchwab?.(t)}
+                title={`Re-include ${t} on the next Schwab sync`}>
+                {t} <span className="suppressed-chip-x">×</span>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Summary cards */}

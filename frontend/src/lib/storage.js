@@ -7,6 +7,7 @@ const KEY = {
   profile:   'alphadesk:profile:v1',
   weights:   'alphadesk:weights:v1',
   scoreHistory: 'alphadesk:scoreHistory:v1',
+  schwabSuppressed: 'alphadesk:schwabSuppressed:v1',
 }
 
 function read(key, fallback) {
@@ -53,4 +54,10 @@ export const storage = {
     const all = read(KEY.scoreHistory, {})
     return ticker ? (all[ticker] || []) : all
   },
+
+  // Tickers the user explicitly removed from a Schwab sync. The merge logic
+  // checks this set and skips matches, so manually-excluded names don't
+  // silently re-add on the next sync.
+  loadSchwabSuppressed: () => read(KEY.schwabSuppressed, []),
+  saveSchwabSuppressed: (tickers) => write(KEY.schwabSuppressed, tickers),
 }
