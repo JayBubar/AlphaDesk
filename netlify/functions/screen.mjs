@@ -541,6 +541,13 @@ function buildEarningsFlag(dateStr) {
 
 async function runHandler(req) {
   const sp = new URL(req.url).searchParams;
+  const debug = sp.get('debug') === '1';
+  const debugLog = [];
+  const t0 = Date.now();
+  const mark = (step, extra = {}) => {
+    if (debug) debugLog.push({ step, ms: Date.now() - t0, ...extra });
+  };
+  mark('start');
 
     const filterSector = sp.get('sector')  || '';
     const filterCap    = sp.get('cap')     || '';
@@ -554,12 +561,15 @@ async function runHandler(req) {
     const universeCap  = UNIVERSE_CAPS[universeSize] ?? UNIVERSE_CAPS.medium;
 
     const fmpKey = process.env.FMP_API_KEY || '';
+    mark('token-start');
     const token  = await getSchwabToken();
+    mark('token-done', { hasToken: !!token });
 
     // Load dynamic universe ({symbol, sector, name}). Sector lives in the
     // universe metadata so we can apply the sector filter BEFORE any API
     // calls — huge win at scale.
     let universeEntries = await loadUniverse();
+    mark('universe-loaded', { count: universeEntries.length });
     if (filterSector) {
       universeEntries = universeEntries.filter(u => u.sector === filterSector);
     }
@@ -582,6 +592,7 @@ async function runHandler(req) {
     if (token) {
       // Batch Schwab into smaller chunks (100/call) and run in parallel —
       // single large batches were timing out at ~6s on this account.
+      mark('schwab-batches-start', { batches: Math.ceil(universeSymbols.length / SCHWAB_BATCH_SIZE) });
       const schwabBatches = await Promise.all(
         chunk(universeSymbols, SCHWAB_BATCH_SIZE).map(async batch => {
           try {
@@ -607,6 +618,10 @@ async function runHandler(req) {
         }),
       );
 
+      mark('schwab-batches-done', {
+        ok:     schwabBatches.filter(b => b !== null).length,
+        failed: schwabBatches.filter(b => b === null).length,
+      });
       // If every batch failed, treat as Schwab outage and drop to FMP-only.
       if (schwabBatches.every(b => b === null)) {
         // fall through to Path B
@@ -639,16 +654,26 @@ async function runHandler(req) {
           presurvivors.push(symbol);
         }
 
-        if (!presurvivors.length) return Response.json([]);
+        mark('presurvivors', { count: presurvivors.length });
+        if (!presurvivors.length) {
+          return debug
+            ? Response.json({ debug: debugLog, presurvivors: 0 })
+            : Response.json([]);
+        }
 
         // Batch FMP /profile and /quote in chunks of 100 (per-call URL limit).
         const fmpChunks = chunk(presurvivors, FMP_BATCH_SIZE);
+        mark('fmp-start', { chunks: fmpChunks.length });
         const [profileMaps, fmpQuoteMaps] = await Promise.all([
           Promise.all(fmpChunks.map(c => fmpBatch('profile', c, fmpKey))),
           Promise.all(fmpChunks.map(c => fmpBatch('quote',   c, fmpKey))),
         ]);
         const profileMap  = Object.assign({}, ...profileMaps);
         const fmpQuoteMap = Object.assign({}, ...fmpQuoteMaps);
+        mark('fmp-done', {
+          profileKeys: Object.keys(profileMap).length,
+          quoteKeys:   Object.keys(fmpQuoteMap).length,
+        });
 
         // Sector filter was already applied universe-side. No second pass needed.
         const survivors = presurvivors;
@@ -697,20 +722,24 @@ async function runHandler(req) {
         // Warm-cache lookup in parallel: filings, research, insider Form 4s,
         // and the earnings calendar.
         const tickers = scoringInput.map(s => s.ticker);
+        mark('caches-start', { tickers: tickers.length });
         const [filingCache, researchCache, insiderCache, earningsMap] = await Promise.all([
           loadFilingCache(tickers),
           loadResearchCache(tickers),
           loadInsiderCache(tickers),
           earningsPromise,
         ]);
+        mark('caches-done');
         for (const s of scoringInput) {
           s.metrics = injectFilingMetrics(s.metrics, filingCache[s.ticker]);
           s.metrics = injectResearchMetrics(s.metrics, researchCache[s.ticker]);
           s.metrics = injectInsiderMetrics(s.metrics, insiderCache[s.ticker]);
         }
 
+        mark('scoring-start');
         const scores  = scoreUniverse(scoringInput, profileName);
-        return Response.json(scoringInput.map((s, i) => {
+        mark('scoring-done');
+        const payload = scoringInput.map((s, i) => {
           const nextEarnings = earningsMap[s.ticker] || null;
           const earningsFlag = buildEarningsFlag(nextEarnings);
           return {
@@ -726,7 +755,11 @@ async function runHandler(req) {
             flags:              earningsFlag ? [earningsFlag] : [],
             why:                `${s.surface.name} (${s.surface.sector}).`,
           };
-        }));
+        });
+        mark('return');
+        return debug
+          ? Response.json({ debug: debugLog, count: payload.length })
+          : Response.json(payload);
       }
       // Schwab call failed (e.g., revoked token); fall through to FMP-only.
     }
