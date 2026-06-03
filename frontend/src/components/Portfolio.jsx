@@ -9,6 +9,7 @@ import ScoreBar from './ScoreBar.jsx'
 import FilingPanel from './FilingPanel.jsx'
 import ResearchPanel from './ResearchPanel.jsx'
 import InsiderPanel from './InsiderPanel.jsx'
+import BacktestPanel from './BacktestPanel.jsx'
 import './Portfolio.css'
 
 const WEIGHT_KEYS = ['fundamentals', 'momentum', 'sentiment', 'filingTone', 'insider']
@@ -458,6 +459,7 @@ export default function Portfolio({
                   <FilingPanel ticker={stock.ticker} />
                   <ResearchPanel ticker={stock.ticker} />
                   <InsiderPanel ticker={stock.ticker} />
+                  <BacktestPanel ticker={stock.ticker} />
                 </div>
               ))}
             </div>

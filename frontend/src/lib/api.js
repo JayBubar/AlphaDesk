@@ -72,6 +72,16 @@ export async function getUniverse({ refresh = false } = {}) {
   return res.json()
 }
 
+export async function getBacktest(ticker, { refresh = false } = {}) {
+  const url = `${BASE}/backtest/${ticker.toUpperCase()}${refresh ? '?refresh=1' : ''}`
+  const res = await fetch(url)
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `Backtest fetch failed: ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function getInsider(ticker, { refresh = false } = {}) {
   const url = `${BASE}/insider/${ticker.toUpperCase()}${refresh ? '?refresh=1' : ''}`
   const res = await fetch(url)

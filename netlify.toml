@@ -4,10 +4,12 @@
   functions = "netlify/functions"
 
 [functions]
-  # Python functions need their backend/ siblings bundled. filings.py and
-  # insider.py both transitively pull in backend/scoring (via version.py).
+  # Python functions need their backend/ siblings bundled. filings.py,
+  # insider.py, and backtest.py all transitively pull in backend/scoring
+  # (via version.py).
   included_files = [
     "backend/__init__.py",
+    "backend/backtest/**",
     "backend/filings/**",
     "backend/insider/**",
     "backend/scoring/**",
