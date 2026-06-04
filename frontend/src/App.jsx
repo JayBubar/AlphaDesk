@@ -5,7 +5,9 @@ import Portfolio from './components/Portfolio.jsx'
 import Signals from './components/Signals.jsx'
 import Nav from './components/Nav.jsx'
 import { storage } from './lib/storage.js'
-import { refreshPrices, getSchwabStatus, getHoldings, syncWatchlist } from './lib/api.js'
+import {
+  refreshPrices, getSchwabStatus, getHoldings, syncWatchlist, getUniverse,
+} from './lib/api.js'
 import './App.css'
 
 /**
@@ -95,6 +97,20 @@ export default function App() {
   const [schwabError, setSchwabError] = useState(null)
   const [schwabLastSync, setSchwabLastSync] = useState(null)
   const [schwabSuppressed, setSchwabSuppressed] = useState(() => storage.loadSchwabSuppressed())
+  // Schwab Slices eligibility = S&P 500 membership. Pulled once on mount;
+  // cached server-side for 7 days so this is essentially free.
+  const [slicesSet, setSlicesSet] = useState(() => new Set())
+
+  useEffect(() => {
+    getUniverse()
+      .then(u => {
+        const sp500 = (u?.tickers || [])
+          .filter(t => t.index === 'sp500')
+          .map(t => t.symbol)
+        setSlicesSet(new Set(sp500))
+      })
+      .catch(() => { /* graceful: no badges if universe fetch fails */ })
+  }, [])
 
   useEffect(() => { storage.saveSchwabSuppressed(schwabSuppressed) }, [schwabSuppressed])
   useEffect(() => { storage.saveWatchlist(watchlist) }, [watchlist])
@@ -259,6 +275,7 @@ export default function App() {
             onSuppressPosition={suppressSchwabPosition}
             favorites={favoritesSet}
             onToggleFavorite={toggleFavorite}
+            slicesSet={slicesSet}
           />
         )}
         {view === 'signals' && (

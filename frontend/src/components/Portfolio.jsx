@@ -17,10 +17,12 @@ import {
 } from 'recharts'
 import { fmtNum, fmtPct, scoreColor, scoreBg } from '../lib/scoring.js'
 import StarButton from './StarButton.jsx'
+import SlicesBadge from './SlicesBadge.jsx'
 import FilingPanel from './FilingPanel.jsx'
 import ResearchPanel from './ResearchPanel.jsx'
 import InsiderPanel from './InsiderPanel.jsx'
 import BacktestPanel from './BacktestPanel.jsx'
+import './SlicesBadge.css'
 import './Portfolio.css'
 
 const SECTOR_COLORS = [
@@ -74,6 +76,7 @@ export default function Portfolio({
   onSuppressPosition,
   favorites,
   onToggleFavorite,
+  slicesSet,
 }) {
   const [activeTab, setActiveTab] = useState('positions')
   const [expanded, setExpanded] = useState(null)
@@ -292,6 +295,7 @@ export default function Portfolio({
                               {r.ticker}
                               <span className="live-badge"
                                 title={`Schwab ${r.accountNumber || ''} · ${r.assetType}`}>LIVE</span>
+                              {r.isEquity && <SlicesBadge active={slicesSet?.has(r.ticker)} />}
                             </div>
                             <div className="ticker-name">{r.name}</div>
                           </td>

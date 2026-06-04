@@ -1,0 +1,21 @@
+.slices-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(0, 169, 224, 0.14);
+  color: #00a9e0;             /* Schwab blue */
+  border: 1px solid rgba(0, 169, 224, 0.32);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+  font-family: var(--font-body);
+}
+.slices-badge--sm {
+  font-size: 9px;
+  margin-left: 6px;
+}
+.slices-badge--md {
+  font-size: 10px;
+  margin-left: 6px;
+  padding: 2px 7px;
+}

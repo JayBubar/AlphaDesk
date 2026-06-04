@@ -731,6 +731,10 @@ async function runHandler(req) {
               low52w:    safe(q['52WkLow']),
               divYield:  safe(f.divYield),
               dcf:       safe(p.dcf),
+              // S&P 500 membership = Schwab Stock Slices eligible. The
+              // universe blob tags each ticker with its index origin.
+              index:     meta.index || null,
+              slices:    meta.index === 'sp500',
             },
           };
         });
@@ -796,11 +800,15 @@ async function runHandler(req) {
     ]);
     const profileMap  = Object.assign({}, ...profileMaps);
     const fmpQuoteMap = Object.assign({}, ...fmpQuoteMaps);
+    const universeMeta = Object.fromEntries(
+      universeEntries.map(u => [u.symbol, u]),
+    );
 
     const survivors = [];
     for (const sym of universeSymbols) {
       const p  = profileMap[sym]  || {};
       const fq = fmpQuoteMap[sym] || {};
+      const meta = universeMeta[sym] || {};
       const cp = safe(fq.price, 0);
       if (!cp) continue;
 
@@ -824,8 +832,8 @@ async function runHandler(req) {
         ticker:  sym,
         metrics: fmpOnlyToMetrics(p, fq),
         surface: {
-          name:      safe(p.companyName, sym),
-          sector:    sec,
+          name:      safe(p.companyName ?? meta.name, sym),
+          sector:    sec || safe(meta.sector, ''),
           industry:  safe(p.industry, ''),
           price:     Math.round(cp * 100) / 100,
           change:    safe(fq.changesPercentage),
@@ -837,6 +845,8 @@ async function runHandler(req) {
           low52w:    safe(fq.yearLow),
           divYield:  safe(p.lastDiv),
           dcf:       safe(p.dcf),
+          index:     meta.index || null,
+          slices:    meta.index === 'sp500',
         },
       });
     }

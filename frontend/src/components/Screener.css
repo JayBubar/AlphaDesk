@@ -560,3 +560,21 @@ input[type=range] {
   color: var(--text-muted);
   background: var(--bg-input);
 }
+
+.filter-field--checkbox {
+  justify-content: center;
+}
+.slices-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 0;
+  user-select: none;
+}
+.slices-toggle input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--gold);
+}

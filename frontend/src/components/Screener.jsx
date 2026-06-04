@@ -8,7 +8,9 @@ import { PROFILES, PROFILE_KEYS, DEFAULT_PROFILE, getProfile } from '../lib/prof
 import { storage } from '../lib/storage.js'
 import ScoreBar from './ScoreBar.jsx'
 import SectorHeatmap from './SectorHeatmap.jsx'
+import SlicesBadge from './SlicesBadge.jsx'
 import './SectorHeatmap.css'
+import './SlicesBadge.css'
 import './Screener.css'
 
 const SECTORS = [
@@ -45,6 +47,7 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
     volMin: 500, betaMax: 1.5,
     universeSize: 'medium',  // small (250) | medium (500) | full (~900, risk of timeout)
   })
+  const [slicesOnly, setSlicesOnly] = useState(false)
   const [profile, setProfile] = useState(() => storage.loadProfile() || DEFAULT_PROFILE)
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -121,11 +124,13 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
   }
 
   const sorted = results
-    ? [...results].sort((a, b) => {
-        const av = sortKey === 'composite' ? a.composite : (a[sortKey] ?? -999)
-        const bv = sortKey === 'composite' ? b.composite : (b[sortKey] ?? -999)
-        return sortDir * (av > bv ? 1 : av < bv ? -1 : 0)
-      })
+    ? [...results]
+        .filter(r => !slicesOnly || r.slices)
+        .sort((a, b) => {
+          const av = sortKey === 'composite' ? a.composite : (a[sortKey] ?? -999)
+          const bv = sortKey === 'composite' ? b.composite : (b[sortKey] ?? -999)
+          return sortDir * (av > bv ? 1 : av < bv ? -1 : 0)
+        })
     : []
 
   function toggleRow(ticker) {
@@ -210,6 +215,14 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
                 <option value="large">Large (~400)</option>
                 <option value="full">Full (~900, may time out)</option>
               </select>
+            </div>
+            <div className="filter-field filter-field--checkbox">
+              <label htmlFor="slicesOnly">Schwab Slices</label>
+              <label className="slices-toggle" title="Show only S&P 500 names eligible for Schwab Stock Slices">
+                <input id="slicesOnly" type="checkbox" checked={slicesOnly}
+                  onChange={e => setSlicesOnly(e.target.checked)} />
+                <span>Slices-eligible only</span>
+              </label>
             </div>
             <div className="filter-field">
               <label>Beta max</label>
@@ -325,7 +338,10 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
                       >
                         <td>
                           <div className="ticker-cell">
-                            <span className="ticker-sym">{stock.ticker}</span>
+                            <span className="ticker-sym">
+                              {stock.ticker}
+                              <SlicesBadge active={stock.slices} />
+                            </span>
                             <span className="ticker-name">{stock.name}</span>
                           </div>
                         </td>

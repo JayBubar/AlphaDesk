@@ -10,10 +10,12 @@ import { useState, Fragment } from 'react'
 import { fmtNum, fmtPct, scoreColor, scoreBg } from '../lib/scoring.js'
 import ScoreBar from './ScoreBar.jsx'
 import StarButton from './StarButton.jsx'
+import SlicesBadge from './SlicesBadge.jsx'
 import FilingPanel from './FilingPanel.jsx'
 import ResearchPanel from './ResearchPanel.jsx'
 import InsiderPanel from './InsiderPanel.jsx'
 import BacktestPanel from './BacktestPanel.jsx'
+import './SlicesBadge.css'
 import './Watchlist.css'
 
 const PILLAR_KEYS = ['fundamentals', 'momentum', 'sentiment', 'filingTone', 'insider']
@@ -109,7 +111,10 @@ export default function Watchlist({
                         />
                       </td>
                       <td>
-                        <div className="ticker-sym">{r.ticker}</div>
+                        <div className="ticker-sym">
+                          {r.ticker}
+                          <SlicesBadge active={r.slices} />
+                        </div>
                         <div className="ticker-name">{r.name}</div>
                       </td>
                       <td>
