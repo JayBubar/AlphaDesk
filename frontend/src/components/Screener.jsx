@@ -9,8 +9,10 @@ import { storage } from '../lib/storage.js'
 import ScoreBar from './ScoreBar.jsx'
 import SectorHeatmap from './SectorHeatmap.jsx'
 import SlicesBadge from './SlicesBadge.jsx'
+import ScoreExplainer from './ScoreExplainer.jsx'
 import './SectorHeatmap.css'
 import './SlicesBadge.css'
+import './ScoreExplainer.css'
 import './Screener.css'
 
 const SECTORS = [
@@ -395,7 +397,7 @@ export default function Screener({ watchlist, onAddToWatchlist, onRemoveFromWatc
                                 <div className="dm-item"><span>Div Yield</span><strong>{stock.divYield ? fmtPct(stock.divYield) : '—'}</strong></div>
                                 <div className="dm-item"><span>Sector</span><strong>{stock.sector || '—'}</strong></div>
                               </div>
-                              {stock.breakdown && <ScoreBreakdown breakdown={stock.breakdown} />}
+                              {stock.breakdown && <ScoreExplainer stock={stock} />}
                             </div>
                           </td>
                         </tr>

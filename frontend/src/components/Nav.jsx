@@ -55,6 +55,10 @@ export default function Nav({ view, setView, watchlistCount, schwabConnected }) 
       </nav>
 
       <div className="nav-status">
+        <a className="nav-method-link" href="/methodology.html" target="_blank"
+           rel="noopener noreferrer" title="Open methodology doc">
+          Methodology
+        </a>
         {schwabConnected === null ? null : schwabConnected ? (
           <>
             <span className="status-dot status-dot--schwab" />

@@ -11,11 +11,13 @@ import { fmtNum, fmtPct, scoreColor, scoreBg } from '../lib/scoring.js'
 import ScoreBar from './ScoreBar.jsx'
 import StarButton from './StarButton.jsx'
 import SlicesBadge from './SlicesBadge.jsx'
+import ScoreExplainer from './ScoreExplainer.jsx'
 import FilingPanel from './FilingPanel.jsx'
 import ResearchPanel from './ResearchPanel.jsx'
 import InsiderPanel from './InsiderPanel.jsx'
 import BacktestPanel from './BacktestPanel.jsx'
 import './SlicesBadge.css'
+import './ScoreExplainer.css'
 import './Watchlist.css'
 
 const PILLAR_KEYS = ['fundamentals', 'momentum', 'sentiment', 'filingTone', 'insider']
@@ -227,6 +229,7 @@ export default function Watchlist({
                         <td colSpan={10}>
                           <div className="wl-expanded">
                             <ThesisEditor stock={r} onSetThesis={onSetThesis} />
+                            <ScoreExplainer stock={r} />
                             <FilingPanel ticker={r.ticker} />
                             <ResearchPanel ticker={r.ticker} />
                             <InsiderPanel ticker={r.ticker} />

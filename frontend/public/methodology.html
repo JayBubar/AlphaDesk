@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>AlphaDesk · Scoring Methodology</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --gold:   #c9a84c;
+    --green:  #3ecf8e;
+    --red:    #f87171;
+    --amber:  #facc15;
+    --blue:   #60a5fa;
+    --text:   #1a1a1a;
+    --muted:  #6b7280;
+    --rule:   #e5e7eb;
+    --bg:     #fafaf7;
+    --card:   #ffffff;
+  }
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    margin: 0 auto;
+    padding: 48px 32px 80px;
+    max-width: 880px;
+  }
+  h1, h2, h3 {
+    font-family: 'DM Serif Display', Georgia, serif;
+    font-weight: 400;
+    color: var(--text);
+  }
+  h1 { font-size: 38px; margin: 0 0 4px; letter-spacing: -0.5px; }
+  h1 em { color: var(--gold); font-style: italic; }
+  .sub {
+    font-size: 14px;
+    color: var(--muted);
+    margin: 0 0 32px;
+  }
+  h2 {
+    font-size: 24px;
+    margin: 36px 0 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--rule);
+  }
+  h3 {
+    font-size: 18px;
+    margin: 22px 0 4px;
+  }
+  p { margin: 8px 0; }
+  ul { margin: 6px 0 16px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  code {
+    font-family: 'DM Mono', ui-monospace, 'SF Mono', monospace;
+    font-size: 13px;
+    background: #f0eee5;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .pillar-card {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 12px 0;
+  }
+  .pillar-card h3 {
+    margin-top: 0;
+    color: var(--gold);
+  }
+  .pillar-card .why {
+    font-style: italic;
+    color: var(--muted);
+    border-left: 3px solid var(--gold);
+    padding-left: 14px;
+    margin: 10px 0 0 0;
+  }
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 14px;
+    margin: 12px 0 24px;
+  }
+  .metric-card {
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .metric-card h4 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .metric-card .dir {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 8px;
+  }
+  .metric-card .dir-up   { color: var(--green); }
+  .metric-card .dir-down { color: var(--red);   }
+  .metric-card .summary {
+    color: var(--text);
+    margin: 4px 0;
+  }
+  .metric-card .why {
+    color: var(--muted);
+    font-size: 13px;
+    border-top: 1px dashed var(--rule);
+    padding-top: 6px;
+    margin: 6px 0 0 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 24px;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+  th { background: #f0eee5; font-weight: 600; }
+  td code { background: transparent; padding: 0; }
+  .nb {
+    background: #fff8e1;
+    border-left: 3px solid var(--amber);
+    padding: 10px 14px;
+    margin: 14px 0;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  @media print {
+    body { padding: 24px; max-width: none; }
+    .pillar-card, .metric-card, table { break-inside: avoid; }
+    h2 { break-after: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<h1>AlphaDesk · <em>Scoring Methodology</em></h1>
+<p class="sub">How composite scores are computed, what each metric measures, and why.<br>
+   Current methodology version: <code>2026.06.2</code></p>
+
+<h2>1 · Overview</h2>
+<p>AlphaDesk rates every stock in its scan universe on a 0-100 composite score.
+   The composite is a weighted average of five <strong>pillars</strong>, each of which is itself
+   a weighted average of three to four <strong>metrics</strong>.</p>
+<p>The five pillars represent five distinct lenses on the same business:
+   <strong>fundamentals</strong> (is it healthy and fairly priced?),
+   <strong>momentum</strong> (which way is the chart drifting?),
+   <strong>sentiment</strong> (what does the rest of the market think?),
+   <strong>filings tone</strong> (what is management writing differently this year?),
+   and <strong>insider activity</strong> (are the people closest to the business buying or selling?).</p>
+<p>Each pillar carries a weight that depends on the <strong>profile</strong> you select.
+   A value-investor profile leans hard on fundamentals; a momentum profile flips that around.
+   Same data, different question, different answer.</p>
+
+<div class="nb">
+  <strong>Sanity check:</strong> if a metric returns no data for a ticker, it does not
+  default to zero. It is excluded from the pillar average, so the pillar is computed from
+  whatever is available. The composite remains on a 0-100 scale.
+</div>
+
+<h2>2 · The Five Pillars</h2>
+
+<div class="pillar-card">
+  <h3>Fundamentals</h3>
+  <p>Is the underlying business healthy and reasonably valued? Combines profitability,
+  leverage, and valuation metrics.</p>
+  <p class="why">Fundamentals separate companies that make real money from ones that
+  survive on storytelling. Even if everything else looks great, weak fundamentals make
+  a stock fragile under any market stress.</p>
+</div>
+
+<div class="pillar-card">
+  <h3>Momentum</h3>
+  <p>Where is the stock in its recent trading range, and which way is price drifting?</p>
+  <p class="why">Markets are not perfectly efficient — winners tend to keep winning for
+  stretches, and beaten-down stocks can keep falling. Momentum captures this drift
+  without becoming a pure trend-chase.</p>
+</div>
+
+<div class="pillar-card">
+  <h3>Sentiment</h3>
+  <p>What does the rest of the market think? Aggregates analyst targets, short interest,
+  and AI-summarized news sentiment.</p>
+  <p class="why">Markets are a voting machine in the short term. If everyone hates a name,
+  the price reflects that — and a fundamentals-only view will miss the catalyst when
+  sentiment flips. Inversely, crowded longs can disappoint when news turns.</p>
+</div>
+
+<div class="pillar-card">
+  <h3>Filings Tone</h3>
+  <p>How is management writing about the business? Compares year-over-year language in
+  the 10-K Risk Factors and MD&A sections.</p>
+  <p class="why">Management's word choice is signal. When Risk Factors get heavier
+  year-over-year, or hedging phrases ("subject to", "no assurance") multiply, the
+  people running the company are quietly telling you something the press release didn't.</p>
+</div>
+
+<div class="pillar-card">
+  <h3>Insider Activity</h3>
+  <p>Open-market buys vs sales by company insiders over the last 90 days, sourced from
+  SEC Form 4 filings.</p>
+  <p class="why">Officers and directors have a hundred reasons to sell — taxes,
+  diversification, kids in college. They have exactly one reason to buy: they think the
+  stock goes up. Net buying — especially clustered and at meaningful dollar size — is
+  one of the cleanest signals available because it's the people closest to the actual
+  numbers.</p>
+</div>
+
+<h2>3 · The Profiles</h2>
+<p>The profile selector reweights the pillars to match how you're thinking about the position.
+   Same composite scale (0-100), different priorities.</p>
+
+<table>
+  <thead>
+    <tr><th>Profile</th><th>Fundamentals</th><th>Momentum</th><th>Sentiment</th><th>Filings</th><th>Insider</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>value_long</strong></td><td>45%</td><td>10%</td><td>10%</td><td>25%</td><td>10%</td></tr>
+    <tr><td><strong>growth_mid</strong></td><td>30%</td><td>30%</td><td>20%</td><td>15%</td><td>5%</td></tr>
+    <tr><td><strong>speculative</strong></td><td>10%</td><td>40%</td><td>35%</td><td>5%</td><td>10%</td></tr>
+    <tr><td><strong>penny</strong></td><td>5%</td><td>15%</td><td>70%</td><td>5%</td><td>5%</td></tr>
+  </tbody>
+</table>
+
+<p><strong>value_long</strong> rewards stable businesses you can hold through cycles.
+   <strong>growth_mid</strong> is the default — balanced, like the indexes themselves.
+   <strong>speculative</strong> tilts toward what's working in the tape right now.
+   <strong>penny</strong> recognizes that under-$5 names trade on sentiment more than
+   anything else; their reported fundamentals are often unreliable.</p>
+
+<h2>4 · Metrics, Pillar by Pillar</h2>
+
+<h3>Fundamentals metrics</h3>
+<div class="metric-grid">
+  <div class="metric-card">
+    <h4>P/E ratio <span class="dir dir-down">lower better</span></h4>
+    <p class="summary">Price divided by trailing twelve-month earnings.</p>
+    <p class="why">How much you pay for each dollar of profit. A P/E of 15 means you
+    wait 15 years (at today's earnings) to recoup. Lower-is-better with the caveat that
+    growth companies command higher multiples for a reason.</p>
+  </div>
+  <div class="metric-card">
+    <h4>FCF yield <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Free cash flow per share divided by share price.</p>
+    <p class="why">The gold standard of valuation because — unlike earnings or revenue —
+    it is almost impossible to fake. Currently null in our pipeline; planned upgrade.</p>
+  </div>
+  <div class="metric-card">
+    <h4>ROIC (proxy: ROE) <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Return on equity — net income divided by shareholder equity.</p>
+    <p class="why">How efficiently the company turns its capital into profit. The proxy
+    (ROE) is imperfect — true ROIC would adjust for debt and operating leases — but
+    the direction is reliable.</p>
+  </div>
+  <div class="metric-card">
+    <h4>Gross margin <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Gross profit divided by revenue.</p>
+    <p class="why">The most pricing-power-y metric in fundamental analysis. A 65% gross
+    margin company has structural advantages — brand, network effects, patents — that
+    a 20% gross margin company doesn't.</p>
+  </div>
+  <div class="metric-card">
+    <h4>Debt / equity <span class="dir dir-down">lower better</span></h4>
+    <p class="summary">Total debt divided by shareholder equity.</p>
+    <p class="why">Leverage. A little debt is fine — it's cheap capital. Too much and
+    the company can't survive a downturn. Above 2.0 means more debt than equity, which
+    historically correlates with worse drawdowns.</p>
+  </div>
+</div>
+
+<h3>Momentum metrics</h3>
+<div class="metric-grid">
+  <div class="metric-card">
+    <h4>52-week position <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Where the current price sits in the 52-week high-to-low range.</p>
+    <p class="why">Stocks near 52-week highs tend to keep working. Stocks near 52-week
+    lows aren't automatically bargains — they may have broken below technical support
+    for fundamental reasons.</p>
+  </div>
+  <div class="metric-card">
+    <h4>Moving average trend <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Whether price > 50-day MA > 200-day MA (uptrend), or reversed.</p>
+    <p class="why">The classic "price above all moving averages" setup that institutional
+    rotation strategies use. Captures medium-term directional bias without overreacting
+    to single-day noise.</p>
+  </div>
+  <div class="metric-card">
+    <h4>Recent price change <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Percent change over the latest available window.</p>
+    <p class="why">Short-term complement to the longer-window indicators. When all three
+    momentum signals agree, the trend is durable; when they disagree, you may be
+    catching a turning point.</p>
+  </div>
+</div>
+
+<h3>Sentiment metrics</h3>
+<div class="metric-grid">
+  <div class="metric-card">
+    <h4>Analyst upside <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Percent gap between average Wall Street price target and the current price.</p>
+    <p class="why">Sell-side analysts are wrong as often as they're right, but consensus
+    target is a useful anchor. Large positive upside = analysts think the market is
+    mispricing low. Large negative upside = even the cheerleaders think it's expensive.</p>
+  </div>
+  <div class="metric-card">
+    <h4>Short interest <span class="dir dir-down">lower better</span></h4>
+    <p class="summary">Shares sold short as a percentage of float.</p>
+    <p class="why">Smart money's bearish bet. Above 5% means meaningful skepticism;
+    above 15% can either be a coiled spring (short squeeze) or a real warning
+    (shorts often catch problems first).</p>
+  </div>
+  <div class="metric-card">
+    <h4>Analyst consensus <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Buy/hold/sell consensus, AI-aggregated via Perplexity.</p>
+    <p class="why">A strong-buy consensus reflects updated information from many analysts.
+    Treat it as a sanity check, not a decision rule.</p>
+  </div>
+  <div class="metric-card">
+    <h4>News sentiment <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Bullish/neutral/bearish read on the last 90 days of news.</p>
+    <p class="why">Captures the tone of recent media coverage. A name with strong
+    fundamentals but uniformly negative recent press deserves more scrutiny than the
+    screener alone would suggest.</p>
+  </div>
+</div>
+
+<h3>Filings tone metrics</h3>
+<div class="metric-grid">
+  <div class="metric-card">
+    <h4>10-K language drift <span class="dir dir-down">lower better</span></h4>
+    <p class="summary">TF-IDF cosine drift between this year and last year for Risk
+    Factors + MD&A. 0 = identical, 100 = totally different.</p>
+    <p class="why">Companies recycle most of their 10-K language verbatim. When they
+    don't — when this year's Risk Factors are written from scratch — something material
+    changed in their assessment of the business.</p>
+  </div>
+  <div class="metric-card">
+    <h4>Hedging language <span class="dir dir-down">lower better</span></h4>
+    <p class="summary">YoY change in the frequency of hedging phrases per 1,000 words.</p>
+    <p class="why">When management starts hedging more in writing, they're often preparing
+    the disclosure ground for bad news. A rising hedging frequency is a quiet warning
+    that often precedes guidance cuts or restructurings.</p>
+  </div>
+</div>
+
+<h3>Insider activity metrics</h3>
+<div class="metric-grid">
+  <div class="metric-card">
+    <h4>Insider buy/sell ratio <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Open-market buys vs sales over the last 90 days, blended 60/40
+    between transaction count and dollar value.</p>
+    <p class="why">The blend prevents one giant CEO sale from drowning out a chorus of
+    smaller director buys, and vice versa.</p>
+  </div>
+  <div class="metric-card">
+    <h4>Insider ownership <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Percent of shares outstanding held by insiders.</p>
+    <p class="why">Skin in the game. Currently null in our pipeline; requires FMP
+    institutional ownership tier.</p>
+  </div>
+  <div class="metric-card">
+    <h4>Institutional ownership <span class="dir dir-up">higher better</span></h4>
+    <p class="summary">Percent of shares outstanding held by institutions.</p>
+    <p class="why">Smart money concentration. Currently null in our pipeline.</p>
+  </div>
+</div>
+
+<h2>5 · The Math</h2>
+<p>For each metric, the raw value is normalized to a 0-100 score using one of two
+   methods:</p>
+<ul>
+  <li><strong>Peer-percentile</strong> (live screener): the metric is ranked against
+      every other ticker in the current scan. Top quintile → 80+, median → ~50,
+      bottom quintile → below 20.</li>
+  <li><strong>Absolute thresholds</strong> (historical backtest only): fixed cutoffs.
+      e.g. PE &lt; 12 → 95, PE 12-18 → 80, etc. Used in backtest because we don't
+      have a historical peer universe to rank against.</li>
+</ul>
+<p>The pillar score is the weighted average of its metric scores (weights renormalized
+   over whichever metrics have data). The composite is the weighted average of pillar
+   scores using the profile's pillar weights.</p>
+
+<h2>6 · Caveats and Limitations</h2>
+<ul>
+  <li><strong>FCF yield, insider ownership, and institutional ownership</strong> are not
+      currently wired into the data pipeline. They will roll in as we add data sources.
+      Until then they're flagged as <code>n/a</code> in the explainer.</li>
+  <li><strong>Sentiment metrics (Perplexity-backed)</strong> only populate after you
+      research a ticker (or the nightly cron does it for watchlist names). Newly
+      screened tickers may show sentiment ≈ 50 until the cache catches up.</li>
+  <li><strong>Filings tone</strong> requires two consecutive 10-Ks. Companies that
+      recently IPO'd or restructured may show a baseline 60 until they have YoY history.</li>
+  <li><strong>The historical backtest</strong> only reconstructs fundamentals + momentum +
+      analyst upside. Filings, insider, and Perplexity sentiment cannot be reconstructed
+      historically, so it tests about 60% of the methodology by weight.</li>
+  <li><strong>Peer-percentile</strong> means a stock's score is relative to the current
+      scan. The same stock will score differently if you change universeSize or sector
+      filter. That's a feature, not a bug — but worth knowing.</li>
+</ul>
+
+<h2>7 · A Note on Using These Scores</h2>
+<p>Composite scores are a starting point, not a verdict. The whole point of the
+   <em>research panels</em> attached to each Watchlist row — 10-K filing tone, Perplexity
+   research card, insider transactions, historical backtest — is to interrogate
+   <em>why</em> the score is what it is before you act on it.</p>
+<p>A high composite with thin sentiment data is not the same as a high composite with
+   triangulating evidence from all five pillars. The score is the headline. The
+   research panels are the article.</p>
+
+<div class="footer">
+  Methodology version <code>2026.06.2</code> · last updated June 2026 ·
+  Reproduce in code at <code>frontend/src/lib/methodology.js</code> and
+  <code>netlify/functions/screen.mjs</code>.
+</div>
+
+</body>
+</html>

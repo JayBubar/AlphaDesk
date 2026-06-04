@@ -150,3 +150,15 @@
   80%  { opacity: 1; }
   100% { opacity: 0; }
 }
+
+.nav-method-link {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+  margin-right: 12px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.nav-method-link:hover {
+  color: var(--gold);
+}
