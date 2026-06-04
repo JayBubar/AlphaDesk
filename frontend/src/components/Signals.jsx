@@ -376,11 +376,13 @@ export default function Signals({ watchlist, positions, livePrices, favorites })
                     {/* Research snapshot (cached) */}
                     <ResearchPreview ticker={result.ticker} />
 
-                    {/* Why it was added */}
-                    {stock?.why && (
+                    {/* User's editable thesis (Watchlist) or generated "why" */}
+                    {(stock?.userThesis || stock?.why) && (
                       <div className="signal-why">
-                        <span className="detail-col-title">Original thesis</span>
-                        <p>{stock.why}</p>
+                        <span className="detail-col-title">
+                          {stock?.userThesis ? 'Your thesis' : 'Auto-generated'}
+                        </span>
+                        <p>{stock?.userThesis || stock?.why}</p>
                       </div>
                     )}
                   </div>

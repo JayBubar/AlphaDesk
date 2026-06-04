@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getFiling } from '../lib/api.js'
 import './FilingPanel.css'
 
@@ -6,6 +6,16 @@ export default function FilingPanel({ ticker }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  // Cache-only auto-load: show cached score immediately on remount; if no
+  // cache exists, panel stays in initial state until user clicks the button.
+  useEffect(() => {
+    let alive = true
+    getFiling(ticker, { cacheOnly: true })
+      .then(r => { if (alive && r && r.cached !== false) setData(r) })
+      .catch(() => { /* silent */ })
+    return () => { alive = false }
+  }, [ticker])
 
   async function load(forceRefresh = false) {
     setLoading(true)

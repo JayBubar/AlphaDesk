@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getInsider } from '../lib/api.js'
 import './InsiderPanel.css'
 
@@ -21,6 +21,14 @@ export default function InsiderPanel({ ticker }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    getInsider(ticker, { cacheOnly: true })
+      .then(r => { if (alive && r && r.cached !== false) setData(r) })
+      .catch(() => { /* silent */ })
+    return () => { alive = false }
+  }, [ticker])
 
   async function load(forceRefresh = false) {
     setLoading(true)

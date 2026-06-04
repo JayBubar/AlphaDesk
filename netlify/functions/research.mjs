@@ -103,7 +103,9 @@ export default async (req) => {
     return Response.json({ error: 'ticker required' }, { status: 400, headers: CORS });
   }
 
-  const refresh = new URL(req.url).searchParams.get('refresh') === '1';
+  const sp = new URL(req.url).searchParams;
+  const refresh   = sp.get('refresh') === '1';
+  const cacheOnly = sp.get('cacheOnly') === '1';
   const apiKey = process.env.PERPLEXITY_API_KEY || '';
 
   // Try cache first (unless refresh requested).
@@ -119,6 +121,10 @@ export default async (req) => {
     } catch { /* cache miss → fall through */ }
   }
 
+  if (cacheOnly) {
+    // No cached entry and caller doesn't want a fresh fetch.
+    return Response.json({ cached: false }, { headers: CORS });
+  }
   if (!apiKey) {
     return Response.json(
       { error: 'Research not configured', detail: 'PERPLEXITY_API_KEY not set' },

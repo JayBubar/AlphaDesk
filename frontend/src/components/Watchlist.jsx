@@ -6,7 +6,7 @@
  * (SEC Form 4), BacktestPanel (FMP history replay). The Signals tab consumes
  * the subset of these the user stars as favorites.
  */
-import { useState, Fragment } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import { fmtNum, fmtPct, scoreColor, scoreBg } from '../lib/scoring.js'
 import ScoreBar from './ScoreBar.jsx'
 import StarButton from './StarButton.jsx'
@@ -20,6 +20,57 @@ import './Watchlist.css'
 
 const PILLAR_KEYS = ['fundamentals', 'momentum', 'sentiment', 'filingTone', 'insider']
 
+function fmtDateCell(iso) {
+  if (!iso) return { label: '—', tier: 'muted' }
+  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / 86400_000)
+  if (days < 0) return { label: '—', tier: 'muted' }
+  const date = new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  let tier = 'muted'
+  if (days <= 7) tier = 'soon'
+  else if (days <= 14) tier = 'near'
+  return { label: `${date} (${days}d)`, tier }
+}
+
+/**
+ * Inline thesis editor. Loads the saved user thesis, falls back to the
+ * screener-generated `why` if none. Auto-saves on blur. The fallback text
+ * is shown as placeholder so the user can see what was auto-generated
+ * without it polluting the saved value.
+ */
+function ThesisEditor({ stock, onSetThesis }) {
+  const [value, setValue] = useState(stock.userThesis || '')
+  const [savedFeedback, setSavedFeedback] = useState(false)
+
+  // Re-sync when switching between tickers (component reused across rows).
+  useEffect(() => { setValue(stock.userThesis || '') }, [stock.ticker, stock.userThesis])
+
+  function handleBlur() {
+    const next = value.trim()
+    if (next === (stock.userThesis || '').trim()) return  // no change
+    onSetThesis?.(stock.ticker, next)
+    setSavedFeedback(true)
+    setTimeout(() => setSavedFeedback(false), 1200)
+  }
+
+  return (
+    <div className="wl-thesis">
+      <div className="wl-thesis-head">
+        <span className="wl-thesis-label">Why I'm watching</span>
+        {savedFeedback && <span className="wl-thesis-saved">saved ✓</span>}
+      </div>
+      <textarea
+        className="wl-thesis-input"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={handleBlur}
+        placeholder={stock.why ? `Auto: ${stock.why}` : 'What caught your eye? Save on click-away.'}
+        rows={2}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  )
+}
+
 export default function Watchlist({
   watchlist,
   onRemoveFromWatchlist,
@@ -29,6 +80,7 @@ export default function Watchlist({
   lastRefresh,
   favorites,
   onToggleFavorite,
+  onSetThesis,
 }) {
   const [expanded, setExpanded] = useState(null)
   const [sortKey, setSortKey] = useState('composite')
@@ -93,6 +145,8 @@ export default function Watchlist({
                 <th onClick={() => handleSort('change')} className="sortable">Day</th>
                 <th>Pillars</th>
                 <th>Sector</th>
+                <th onClick={() => handleSort('nextEarnings')} className="sortable">Earnings</th>
+                <th onClick={() => handleSort('nextDividend')} className="sortable">Ex-div</th>
                 <th></th>
               </tr>
             </thead>
@@ -141,6 +195,25 @@ export default function Watchlist({
                         </div>
                       </td>
                       <td className="muted">{r.sector || '—'}</td>
+                      <td className="mono">
+                        {(() => {
+                          const e = fmtDateCell(r.nextEarnings)
+                          return <span className={`date-cell date-cell--${e.tier}`}>{e.label}</span>
+                        })()}
+                      </td>
+                      <td className="mono">
+                        {(() => {
+                          const d = fmtDateCell(r.nextDividend)
+                          return (
+                            <span className={`date-cell date-cell--${d.tier}`}>
+                              {d.label}
+                              {r.divAmount > 0 && d.tier !== 'muted' && (
+                                <span className="div-amount"> ${r.divAmount.toFixed(2)}</span>
+                              )}
+                            </span>
+                          )
+                        })()}
+                      </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <button className="remove-btn"
                           onClick={() => onRemoveFromWatchlist(r.ticker)}
@@ -151,14 +224,9 @@ export default function Watchlist({
                     </tr>
                     {isOpen && (
                       <tr className="wl-expanded-row">
-                        <td colSpan={8}>
+                        <td colSpan={10}>
                           <div className="wl-expanded">
-                            {r.why && (
-                              <div className="wl-thesis">
-                                <span className="wl-thesis-label">Why I'm watching</span>
-                                <p>{r.why}</p>
-                              </div>
-                            )}
+                            <ThesisEditor stock={r} onSetThesis={onSetThesis} />
                             <FilingPanel ticker={r.ticker} />
                             <ResearchPanel ticker={r.ticker} />
                             <InsiderPanel ticker={r.ticker} />

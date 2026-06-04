@@ -206,6 +206,12 @@ export default function App() {
     setWatchlist(prev => prev.filter(s => s.ticker !== ticker))
   }
 
+  function setUserThesis(ticker, thesis) {
+    setWatchlist(prev => prev.map(s =>
+      s.ticker === ticker ? { ...s, userThesis: thesis } : s
+    ))
+  }
+
   function toggleFavorite(ticker) {
     setFavorites(prev =>
       prev.includes(ticker)
@@ -256,6 +262,7 @@ export default function App() {
             lastRefresh={lastRefresh}
             favorites={favoritesSet}
             onToggleFavorite={toggleFavorite}
+            onSetThesis={setUserThesis}
           />
         )}
         {view === 'portfolio' && (

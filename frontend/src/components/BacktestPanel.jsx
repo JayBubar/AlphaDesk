@@ -8,7 +8,7 @@
  * Reads from /api/backtest/{ticker} which is FMP-backed and cached locally on
  * the function for 30 days. First call per ticker is ~3-5s while FMP responds.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, Legend,
   ReferenceLine, ResponsiveContainer, CartesianGrid,
@@ -31,6 +31,14 @@ export default function BacktestPanel({ ticker }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let alive = true
+    getBacktest(ticker, { cacheOnly: true })
+      .then(r => { if (alive && r && r.cached !== false) setData(r) })
+      .catch(() => { /* silent */ })
+    return () => { alive = false }
+  }, [ticker])
 
   async function load(forceRefresh = false) {
     setLoading(true)

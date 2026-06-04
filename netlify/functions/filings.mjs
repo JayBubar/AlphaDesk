@@ -272,7 +272,7 @@ function metaToDict(meta) {
 
 // ── Orchestration ───────────────────────────────────────────────────────────
 
-async function compute(ticker, { forceRefresh = false } = {}) {
+async function compute(ticker, { forceRefresh = false, cacheOnly = false } = {}) {
   ticker = ticker.toUpperCase();
 
   let store;
@@ -289,6 +289,8 @@ async function compute(ticker, { forceRefresh = false } = {}) {
       }
     } catch { /* fall through */ }
   }
+
+  if (cacheOnly) return { cached: false };
 
   const cik = await cikForTicker(ticker);
   if (!cik) return emptyResult(ticker, 'ticker not in EDGAR CIK table');
@@ -387,10 +389,12 @@ export default async (req) => {
     return Response.json({ error: 'ticker required' }, { status: 400, headers: CORS });
   }
 
-  const refresh = new URL(req.url).searchParams.get('refresh') === '1';
+  const sp = new URL(req.url).searchParams;
+  const refresh   = sp.get('refresh') === '1';
+  const cacheOnly = sp.get('cacheOnly') === '1';
 
   try {
-    const result = await compute(ticker, { forceRefresh: refresh });
+    const result = await compute(ticker, { forceRefresh: refresh, cacheOnly });
     return Response.json(result, { headers: CORS });
   } catch (err) {
     return Response.json(

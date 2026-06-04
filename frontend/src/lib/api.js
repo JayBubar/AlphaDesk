@@ -12,8 +12,9 @@ export async function screenStocks(filters) {
   return res.json()
 }
 
-export async function getFiling(ticker, { refresh = false } = {}) {
-  const url = `${BASE}/filings/${ticker.toUpperCase()}${refresh ? '?refresh=1' : ''}`
+export async function getFiling(ticker, { refresh = false, cacheOnly = false } = {}) {
+  const qs = refresh ? '?refresh=1' : cacheOnly ? '?cacheOnly=1' : ''
+  const url = `${BASE}/filings/${ticker.toUpperCase()}${qs}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Filing fetch failed: ${res.status}`)
   return res.json()
@@ -55,8 +56,9 @@ export async function connectSchwab() {
   window.location.href = `${BASE}/schwab-auth`
 }
 
-export async function getResearch(ticker, { refresh = false } = {}) {
-  const url = `${BASE}/research/${ticker.toUpperCase()}${refresh ? '?refresh=1' : ''}`
+export async function getResearch(ticker, { refresh = false, cacheOnly = false } = {}) {
+  const qs = refresh ? '?refresh=1' : cacheOnly ? '?cacheOnly=1' : ''
+  const url = `${BASE}/research/${ticker.toUpperCase()}${qs}`
   const res = await fetch(url)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
@@ -72,8 +74,9 @@ export async function getUniverse({ refresh = false } = {}) {
   return res.json()
 }
 
-export async function getBacktest(ticker, { refresh = false } = {}) {
-  const url = `${BASE}/backtest/${ticker.toUpperCase()}${refresh ? '?refresh=1' : ''}`
+export async function getBacktest(ticker, { refresh = false, cacheOnly = false } = {}) {
+  const qs = refresh ? '?refresh=1' : cacheOnly ? '?cacheOnly=1' : ''
+  const url = `${BASE}/backtest/${ticker.toUpperCase()}${qs}`
   const res = await fetch(url)
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
@@ -82,8 +85,9 @@ export async function getBacktest(ticker, { refresh = false } = {}) {
   return res.json()
 }
 
-export async function getInsider(ticker, { refresh = false } = {}) {
-  const url = `${BASE}/insider/${ticker.toUpperCase()}${refresh ? '?refresh=1' : ''}`
+export async function getInsider(ticker, { refresh = false, cacheOnly = false } = {}) {
+  const qs = refresh ? '?refresh=1' : cacheOnly ? '?cacheOnly=1' : ''
+  const url = `${BASE}/insider/${ticker.toUpperCase()}${qs}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Insider fetch failed: ${res.status}`)
   return res.json()

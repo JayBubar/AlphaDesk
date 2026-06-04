@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getResearch } from '../lib/api.js'
 import './ResearchPanel.css'
 
@@ -18,6 +18,17 @@ export default function ResearchPanel({ ticker }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+
+  // Cache-only auto-load on mount: if the result is already cached, show it;
+  // if not, leave the panel in its initial "click to research" state without
+  // burning Perplexity quota. Result persists across row collapse/re-expand.
+  useEffect(() => {
+    let alive = true
+    getResearch(ticker, { cacheOnly: true })
+      .then(r => { if (alive && r && r.cached !== false) setData(r) })
+      .catch(() => { /* silent — no cache, no problem */ })
+    return () => { alive = false }
+  }, [ticker])
 
   async function load(forceRefresh = false) {
     setLoading(true)

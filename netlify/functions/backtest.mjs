@@ -68,10 +68,23 @@ function normalizePriceRows(raw, years) {
   return out.filter(r => Number(r.date.slice(0, 4)) > cutoffYear);
 }
 
+function fmpError(label, res) {
+  if (res.status === 402) {
+    return new Error(
+      `FMP ${label}: 402 — endpoint requires a paid FMP plan. ` +
+      `The free tier doesn't include historical fundamentals.`
+    );
+  }
+  if (res.status === 429) {
+    return new Error(`FMP ${label}: 429 — rate limited. Wait a minute and retry.`);
+  }
+  return new Error(`FMP ${label}: ${res.status}`);
+}
+
 async function fetchHistoricalPrices(ticker, apiKey) {
   const url = `${FMP_BASE}/historical-price-eod/full?symbol=${encodeURIComponent(ticker)}&apikey=${apiKey}`;
   const res = await fetchWithTimeout(url);
-  if (!res.ok) throw new Error(`FMP prices ${res.status} for ${ticker}`);
+  if (!res.ok) throw fmpError(`prices for ${ticker}`, res);
   const data = await res.json();
   return normalizePriceRows(data, HISTORY_YEARS);
 }
@@ -79,7 +92,7 @@ async function fetchHistoricalPrices(ticker, apiKey) {
 async function fetchQuarterlyFundamentals(ticker, apiKey) {
   const url = `${FMP_BASE}/key-metrics?symbol=${encodeURIComponent(ticker)}&period=quarter&limit=${FUNDAMENTALS_LIMIT}&apikey=${apiKey}`;
   const res = await fetchWithTimeout(url);
-  if (!res.ok) throw new Error(`FMP fundamentals ${res.status} for ${ticker}`);
+  if (!res.ok) throw fmpError(`fundamentals for ${ticker}`, res);
   const data = await res.json();
   if (!Array.isArray(data)) return [];
   return data;
@@ -333,7 +346,7 @@ function emptyResult(ticker, error) {
   };
 }
 
-async function runBacktest(ticker, { forceRefresh = false } = {}) {
+async function runBacktest(ticker, { forceRefresh = false, cacheOnly = false } = {}) {
   ticker = ticker.toUpperCase();
 
   let store;
@@ -350,6 +363,8 @@ async function runBacktest(ticker, { forceRefresh = false } = {}) {
       }
     } catch { /* miss */ }
   }
+
+  if (cacheOnly) return { cached: false };
 
   const apiKey = process.env.FMP_API_KEY || '';
   if (!apiKey) return emptyResult(ticker, 'FMP_API_KEY not set');
@@ -455,10 +470,12 @@ export default async (req) => {
     return Response.json({ error: 'ticker required' }, { status: 400, headers: CORS });
   }
 
-  const refresh = new URL(req.url).searchParams.get('refresh') === '1';
+  const sp = new URL(req.url).searchParams;
+  const refresh   = sp.get('refresh') === '1';
+  const cacheOnly = sp.get('cacheOnly') === '1';
 
   try {
-    const result = await runBacktest(ticker, { forceRefresh: refresh });
+    const result = await runBacktest(ticker, { forceRefresh: refresh, cacheOnly });
     return Response.json(result, { headers: CORS });
   } catch (err) {
     return Response.json(

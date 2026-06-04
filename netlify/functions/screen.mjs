@@ -528,6 +528,36 @@ async function fetchEarningsMap(apiKey) {
   }
 }
 
+// Dividend calendar — gives us the next ex-dividend date + per-share amount.
+// Ex-div is the cutoff: own the stock before this date to get the next payment.
+async function fetchDividendsMap(apiKey) {
+  if (!apiKey) return {};
+  try {
+    const from = yyyymmdd(new Date());
+    const to   = yyyymmdd(new Date(Date.now() + EARNINGS_WINDOW_DAYS * 86400_000));
+    const url = `${FMP_BASE}/dividends-calendar?from=${from}&to=${to}&apikey=${apiKey}`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return {};
+    const data = await res.json();
+    const map = {};
+    if (Array.isArray(data)) {
+      for (const ev of data) {
+        if (!ev?.symbol || !ev?.date) continue;
+        const existing = map[ev.symbol];
+        if (!existing || ev.date < existing.date) {
+          map[ev.symbol] = {
+            date:   ev.date,
+            amount: ev.dividend ?? ev.adjDividend ?? null,
+          };
+        }
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 function buildEarningsFlag(dateStr) {
   if (!dateStr) return null;
   const days = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400_000);
@@ -535,6 +565,13 @@ function buildEarningsFlag(dateStr) {
   if (days <= 7)  return { type: 'warn',  label: `Earnings in ${days}d` };
   if (days <= 14) return { type: 'info',  label: `Earnings ${days}d` };
   return null;  // outside actionable window
+}
+
+function buildDividendFlag(dateAmount) {
+  if (!dateAmount?.date) return null;
+  const days = Math.ceil((new Date(dateAmount.date).getTime() - Date.now()) / 86400_000);
+  if (days < 0 || days > 7) return null;
+  return { type: 'info', label: `Ex-div ${days}d · $${(dateAmount.amount || 0).toFixed(2)}` };
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -584,9 +621,10 @@ async function runHandler(req) {
 
     const universeSymbols = universeEntries.map(u => u.symbol);
 
-    // Fetch the next 30-day earnings calendar in parallel with Schwab —
-    // it's one HTTP call, zero added latency on the critical path.
-    const earningsPromise = fetchEarningsMap(fmpKey);
+    // Fetch the next 30-day earnings + dividend calendars in parallel with
+    // Schwab — two HTTP calls, zero added latency on the critical path.
+    const earningsPromise  = fetchEarningsMap(fmpKey);
+    const dividendsPromise = fetchDividendsMap(fmpKey);
 
     // ── Path A: Schwab + FMP ────────────────────────────────────────────────
     if (token) {
@@ -743,11 +781,12 @@ async function runHandler(req) {
         // and the earnings calendar.
         const tickers = scoringInput.map(s => s.ticker);
         mark('caches-start', { tickers: tickers.length });
-        const [filingCache, researchCache, insiderCache, earningsMap] = await Promise.all([
+        const [filingCache, researchCache, insiderCache, earningsMap, dividendsMap] = await Promise.all([
           loadFilingCache(tickers),
           loadResearchCache(tickers),
           loadInsiderCache(tickers),
           earningsPromise,
+          dividendsPromise,
         ]);
         mark('caches-done');
         for (const s of scoringInput) {
@@ -761,18 +800,23 @@ async function runHandler(req) {
         mark('scoring-done');
         const payload = scoringInput.map((s, i) => {
           const nextEarnings = earningsMap[s.ticker] || null;
-          const earningsFlag = buildEarningsFlag(nextEarnings);
+          const nextDividend = dividendsMap[s.ticker] || null;
+          const flags = [];
+          const ef = buildEarningsFlag(nextEarnings); if (ef) flags.push(ef);
+          const df = buildDividendFlag(nextDividend); if (df) flags.push(df);
           return {
             ticker:             s.ticker,
             ...s.surface,
             nextEarnings,
+            nextDividend:       nextDividend?.date  || null,
+            divAmount:          nextDividend?.amount || null,
             scores:             scores[i].pillars,
             composite:          scores[i].composite,
             breakdown:          scores[i].breakdown,
             profile:            scores[i].profile,
             methodologyVersion: METHODOLOGY_VERSION,
             dataSource:         'schwab+fmp',
-            flags:              earningsFlag ? [earningsFlag] : [],
+            flags,
             why:                `${s.surface.name} (${s.surface.sector}).`,
           };
         });
@@ -854,11 +898,12 @@ async function runHandler(req) {
     if (!survivors.length) return Response.json([]);
 
     const tickers = survivors.map(s => s.ticker);
-    const [filingCache, researchCache, insiderCache, earningsMap] = await Promise.all([
+    const [filingCache, researchCache, insiderCache, earningsMap, dividendsMap] = await Promise.all([
       loadFilingCache(tickers),
       loadResearchCache(tickers),
       loadInsiderCache(tickers),
       earningsPromise,
+      dividendsPromise,
     ]);
     for (const s of survivors) {
       s.metrics = injectFilingMetrics(s.metrics, filingCache[s.ticker]);
@@ -869,18 +914,23 @@ async function runHandler(req) {
     const scores = scoreUniverse(survivors, profileName);
     return Response.json(survivors.map((s, i) => {
       const nextEarnings = earningsMap[s.ticker] || null;
-      const earningsFlag = buildEarningsFlag(nextEarnings);
+      const nextDividend = dividendsMap[s.ticker] || null;
+      const flags = [];
+      const ef = buildEarningsFlag(nextEarnings); if (ef) flags.push(ef);
+      const df = buildDividendFlag(nextDividend); if (df) flags.push(df);
       return {
         ticker:             s.ticker,
         ...s.surface,
         nextEarnings,
+        nextDividend:       nextDividend?.date  || null,
+        divAmount:          nextDividend?.amount || null,
         scores:             scores[i].pillars,
         composite:          scores[i].composite,
         breakdown:          scores[i].breakdown,
         profile:            scores[i].profile,
         methodologyVersion: METHODOLOGY_VERSION,
         dataSource:         'fmp',
-        flags:              earningsFlag ? [earningsFlag] : [],
+        flags,
         why:                `${s.surface.name} (${s.surface.sector}).`,
       };
     }));
